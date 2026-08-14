@@ -11,10 +11,26 @@ score's implied value. Nobody's salary jumps in one step.
 
 ## Quick start
 
+**First time only** — create the environment and install the dependencies:
+
 ```bash
-python3 -m venv venv && source venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+**Every time after** — the `venv` folder already exists, so just activate it:
+
+```bash
+source venv/bin/activate
+```
+
+On Windows that last line is `venv\Scripts\activate` instead.
+
+You are in the environment when your prompt is prefixed with `(venv)`. It lasts
+for that terminal window only, so it has to be re-run each time you open a new
+one. `deactivate` leaves it; deleting the `venv` folder and repeating the
+first-time steps rebuilds it from scratch if it ever gets into a bad state.
 
 Then, each gameweek:
 
@@ -149,6 +165,8 @@ salary, the upload file is not produced at all.
 ---
 
 ## Tests
+
+With the environment active:
 
 ```bash
 pip install -r requirements-dev.txt
