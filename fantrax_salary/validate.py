@@ -93,6 +93,60 @@ def check_coverage(frame: pd.DataFrame, config: Config) -> Findings:
     return findings
 
 
+def check_current_season_is_results(frame: pd.DataFrame, config: Config) -> Findings:
+    """Catch a preseason projection still being used once the season is played.
+
+    The heaviest input is meant to be the season in progress. Fantrax's Players
+    page defaults to "Projected - Season", so an export taken without changing
+    that dropdown is a *forecast of the whole season* -- and it looks completely
+    normal, which is how it went unnoticed long enough to be worth a check.
+
+    The tell is implied games played, `FPts / FP-per-G`. A full-season
+    projection implies about 33 games for a regular starter from day one; real
+    year-to-date figures imply roughly the number of gameweeks actually played.
+
+    Measured over the *established* players only, not the whole pool. The pool
+    is strongly bimodal -- fringe players are projected a handful of
+    appearances, so the overall median sits around 7 and would barely clear the
+    threshold, while the top scorers sit at a flat 32. Taking the median of the
+    busiest players is what makes the signal unambiguous.
+
+    Skipped at gameweek 0, where a projection is the only thing that exists and
+    is legitimately what you want for the draft. It also necessarily stops
+    discriminating late in the season, when a full-season projection and the
+    actual year-to-date imply a similar number of games -- by which point the
+    two have largely converged anyway.
+    """
+    findings = Findings()
+    if config.gameweek < 1:
+        return findings
+
+    season = config.seasons[0]
+    fpts = pd.to_numeric(frame.get(f"{season.key}_FPts"), errors="coerce")
+    per_game = pd.to_numeric(frame.get(f"{season.key}_FP/G"), errors="coerce")
+    if fpts is None or per_game is None:
+        return findings
+
+    playable = per_game.notna() & (per_game.abs() > 0.01) & fpts.notna()
+    if playable.sum() < 30:
+        return findings
+
+    regulars = fpts[playable].nlargest(min(200, int(playable.sum())))
+    implied = (fpts[regulars.index] / per_game[regulars.index]).median()
+    # Generous: only complain when the file implies far more football than has
+    # actually been played, so an ordinary lag never trips it.
+    if implied > config.gameweek + 3:
+        hint = 'set Stats to the "- YTD" option (not "Projected - Season") before exporting'
+        if season.api_code.startswith("PROJECTION_"):
+            hint += f", and for --source api change {season.key}'s api_code off {season.api_code}"
+        findings.warnings.append(
+            f"{season.label}: implies ~{implied:.0f} games played, but it is gameweek "
+            f"{config.gameweek}. This looks like Fantrax's season projection rather than "
+            f"results to date. On the Players page {hint}."
+        )
+    return findings
+
+
 def check_freshness(config: Config) -> Findings:
     """Warn when a stats file is older than the template it will be joined to.
 
@@ -126,7 +180,12 @@ def check_freshness(config: Config) -> Findings:
 
 def run_all(template: pd.DataFrame, frame: pd.DataFrame, config: Config) -> Findings:
     combined = Findings()
-    for findings in (check_template(template), check_coverage(frame, config), check_freshness(config)):
+    for findings in (
+        check_template(template),
+        check_coverage(frame, config),
+        check_current_season_is_results(frame, config),
+        check_freshness(config),
+    ):
         combined.problems.extend(findings.problems)
         combined.warnings.extend(findings.warnings)
     return combined

@@ -67,6 +67,12 @@ python -m fantrax_salary.cli --gameweek 3 --dry-run
    upload must be in, so it is never reshaped.
 2. **Download the current stats.** Fantrax → Players, with **All players**
    selected — not just available. Save over `data/current/gw1.csv`.
+
+   > **Check the Stats dropdown.** It defaults to **"Projected - Season"**,
+   > which is Fantrax's *forecast of the whole season*, not results. Once the
+   > season has started you want **"2026-27 - YTD"**. An export taken on the
+   > default looks completely normal, so the run warns if the file implies far
+   > more football than has actually been played.
 3. **Run it** with `--gameweek N` and read the report.
 4. **Upload** `output/SalGWN.csv` back into Fantrax.
 
@@ -121,7 +127,7 @@ Precedence is **defaults → config file → CLI flags**.
 | `salary_target_max` | 15,000 | Salary earned by the best score in the pool |
 | `salary_floor` | 2,500 | Nothing may be priced below this |
 | `damping` | 0.5 | Fraction of the gap to the target applied per run |
-| `seasons[].weight` | 0.70 / 0.25 / 0.04 / 0.01 | How much each season counts |
+| `seasons[].weight` | 0.20 / 0.60 / 0.15 / 0.05 | How much each season counts |
 | `blank_zero_seasons` | `true` | Read a 0-point, 0-per-game season as "was not here" |
 | `adp_fallback` | `true` | Use draft ADP to price players with no record |
 | `adp_weight` | 0.25 | How much ADP counts, when it counts at all |
@@ -157,6 +163,55 @@ numbers just lifts third-choice goalkeepers off the floor.
 
 This matters most at **gameweek 0**, because that run's salaries are the ones
 the draft is played with.
+
+---
+
+## Results, not projections
+
+The heaviest input used to be Fantrax's preseason projection, at 70%. It is now
+20%, with 60% on last season's actual results.
+
+The projection is not neutral. Moving weight onto real results drops
+goalkeepers by around 2,500 (Petrovic 10,500 → 8,000, Martinez 9,500 → 6,800)
+and lifts attackers (Haaland 10,800 → 11,900) — it was stacking a second
+positional bias on top of the one already present in the scoring system, which
+[`docs/scoring-review.md`](docs/scoring-review.md) measures.
+
+It is not dropped to zero because the promoted clubs have no Premier League
+record at all, and the projection is the only thing standing between their
+squads and the floor. At 0% the number of floored players rises to 335, against
+264 at the current weighting and 295 under the old one.
+
+**During the season, the fix is the export, not the config** — take the
+"- YTD" view rather than "Projected - Season" (see the weekly routine above)
+and the current-season slot becomes real results automatically. For
+`--source api`, change the `2627` season's `api_code` from
+`PROJECTION_0_926_SEASON` to `SEASON_926_YEAR_TO_DATE`.
+
+---
+
+## Does the cap still bind?
+
+The league is 10 teams, a 15-man squad (2 GK + 13 OF), and a 100,000 salary
+cap. For the draft to involve any real choices, the best possible squad has to
+cost *more* than the cap — otherwise everyone buys the same team and the draft
+is just turn order.
+
+At the current weighting:
+
+| | |
+| --- | --- |
+| Best possible 15 | 166,300 — **166% of the cap** |
+| Cheapest legal 15 | 37,500 — 38% |
+| All 150 rostered players | 1,162,200 — **116% of all ten caps** |
+
+So a manager can afford roughly **half** the distance from the worst legal
+squad to the best, and the league collectively cannot buy the whole desirable
+pool — good players are left on the market. That is the intended behaviour.
+
+Worth re-checking if the roster size, cap, or floor ever change: at a 25-man
+squad the 2,500 floor alone would commit 62,500 of the 100,000 cap, and the
+affordable share collapses from ~50% to ~17%.
 
 ---
 

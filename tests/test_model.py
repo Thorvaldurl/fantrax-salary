@@ -26,8 +26,12 @@ REPO = Path(__file__).resolve().parent.parent
 
 @pytest.fixture(scope="module")
 def cfg():
-    """The original model: no newcomer handling of any kind."""
-    return config_module.load(blank_zero_seasons=False, adp_fallback=False)
+    """The original model: original weights, no newcomer handling of any kind."""
+    return config_module.load(
+        seasons=list(config_module.LEGACY_SEASONS),
+        blank_zero_seasons=False,
+        adp_fallback=False,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -281,6 +285,38 @@ def test_current_model_lifts_newcomers_off_the_floor(cfg, current_cfg):
         after.loc[newcomers, "WeightedScore"].mean() / after["WeightedScore"].mean()
         > before.loc[newcomers, "WeightedScore"].mean() / before["WeightedScore"].mean()
     )
+
+
+def _projection_shaped_frame(games_implied, rows=60):
+    """A current-season frame whose FPts/FP-per-G implies `games_implied` games."""
+    per_game = [3.0 + (i % 5) * 0.4 for i in range(rows)]
+    return pd.DataFrame({
+        "Name": [f"P{i}" for i in range(rows)],
+        "2627_FPts": [p * games_implied for p in per_game],
+        "2627_FP/G": per_game,
+    })
+
+
+def test_projection_used_mid_season_is_flagged(current_cfg):
+    """A full-season projection at gameweek 3 implies ~33 games. Catch it."""
+    cfg3 = config_module.load(gameweek=3)
+    findings = validate.check_current_season_is_results(_projection_shaped_frame(33), cfg3)
+    assert findings.warnings
+    assert "projection" in findings.warnings[0].lower()
+    assert findings.ok, "this is a warning, not a hard failure"
+
+
+def test_real_year_to_date_is_not_flagged():
+    cfg3 = config_module.load(gameweek=3)
+    findings = validate.check_current_season_is_results(_projection_shaped_frame(3), cfg3)
+    assert not findings.warnings
+
+
+def test_projection_is_fine_at_gameweek_zero():
+    """Before a ball is kicked the projection is the only thing that exists."""
+    cfg0 = config_module.load(gameweek=0)
+    findings = validate.check_current_season_is_results(_projection_shaped_frame(33), cfg0)
+    assert not findings.warnings
 
 
 def test_upload_refuses_to_write_blank_salaries(actual, cfg, tmp_path):
