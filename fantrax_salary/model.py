@@ -78,6 +78,109 @@ def blank_zero_seasons(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
     return out
 
 
+def shrink_rates(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
+    """Regress each season's FP/G toward a positional prior, weighted by games played.
+
+    FP/G is a rate, and a rate measured over a handful of games is mostly
+    noise. As written, a player who had one brilliant substitute appearance
+    scores identically to one who sustained that rate over a full season —
+    and the flip side matters just as much: a good player who was rotated,
+    injured, or simply behind someone else in the pecking order gets the same
+    low-games FP/G penalty as a player who is genuinely bad, because the
+    model has no way to tell "this is who they are" from "this is a small,
+    possibly unrepresentative sample."
+
+    Standard fix: `adjusted = (FPts + k * prior) / (GP + k)`. A player with
+    GP >> k keeps essentially their own rate; a player with GP << k is pulled
+    toward what a typical player at their position does. `k` is in the same
+    units as GP, so `shrinkage_k = 7` means "trust the player's own numbers
+    about as much as 7 games' worth of prior."
+
+    Games played is not a column Fantrax exports here, but FPts / FP-per-G
+    reconstructs it exactly: cross-checked against 414 players' actual GP from
+    a separate Fantrax endpoint that does report it, zero mismatches.
+
+    The prior itself is the mean FP/G of "regular" players (at least
+    `shrinkage_min_games` appearances) at the same primary position, for that
+    same season — a bench forward is judged against other forwards, not
+    against the whole pool, and against what a rate actually looks like once
+    established, not against players who might themselves be small samples.
+
+    Only FP/G moves. FPts is untouched, so a player who barely played still
+    contributes little to the cumulative half of the blend — shrinkage
+    changes "how good does the data say they are when they play", not
+    "how much did they actually play", which is a separate and real signal
+    the model should keep.
+
+    Applied to completed seasons only (`config.seasons[1:]`, the same
+    convention `adp_season` uses). `FPts / FP-per-G` is not a real games-played
+    count for `seasons[0]`, the in-progress/preseason slot — it is a
+    projection, and its ratio is an artefact of whatever Fantrax's forecast
+    happens to divide to, not a sample size. Shrinking it as though it were
+    one is actively wrong: it very nearly re-broke the case this function
+    exists to fix, because a fringe player's tiny *implied* "games played" in
+    the projection column dragged their projected rate down hard for no
+    real reason, even while the actual-season correction was working exactly
+    as intended.
+
+    Only players below `shrinkage_min_games` are touched at all — a player at
+    or above the threshold keeps their own rate exactly as reported. This is
+    not just a simplification: the formula's pull never reaches zero, so
+    applying it to everyone shrinks the *whole pool*, including established
+    full-season players — a real first attempt at this did exactly that
+    (Bruno Fernandes 9.79 -> 8.93 on 35 games), which compresses the range
+    `normalise()` scales against and can move a small-sample player's
+    *relative* position the wrong way even while their own raw rate improves.
+    A hard cutoff keeps the scale's anchors — the genuinely established
+    players — untouched, and confines the correction to where the sample
+    actually is too small to trust.
+
+    An incidental but real benefit: `normalise()`'s [0, 1] scale is set by
+    whichever two players happen to sit at the min and max of a column, and on
+    the committed 2025-26 data those were both one-game flukes (Kaye Furo's
+    single bad appearance at the bottom, Walter Benitez's single standout one
+    at the top). This function pulls both back to plausible values, so the
+    scale ends up anchored on genuine full-season performances (Bruno
+    Fernandes, 9.79, becomes the new top) instead of on n=1. That is a partial
+    answer to the separate, cataloged weakness that the whole scale hangs on
+    two points — not a fix for it (a percentile/quantile transform would still
+    be more robust in general), but a real improvement obtained for free here.
+    """
+    if not config.rate_shrinkage:
+        return frame
+
+    out = frame.copy()
+    position = out["Position"].fillna("").str.split(",").str[0].str.strip().str.upper()
+    completed = config.seasons[1:] or config.seasons
+
+    for season in completed:
+        fpts_column, fpg_column = f"{season.key}_FPts", f"{season.key}_FP/G"
+        fpts, fpg = out[fpts_column], out[fpg_column]
+
+        games_played = (fpts / fpg).round()
+        present = fpts.notna() & fpg.notna() & (games_played > 0)
+        if not present.any():
+            continue
+
+        regular = present & (games_played >= config.shrinkage_min_games)
+        pool_prior = fpg[regular].mean()
+        if pd.isna(pool_prior):
+            continue  # not enough data this season to build any prior at all
+        prior = fpg.where(regular).groupby(position).transform("mean").fillna(pool_prior)
+
+        # Only the small-sample rows are touched. A player who has cleared
+        # `shrinkage_min_games` keeps their own rate outright — that threshold
+        # is already "enough games to trust as part of the prior", so it is
+        # also enough to trust on its own. This is what protects the top of
+        # the scale from the Bruno Fernandes problem above.
+        k = config.shrinkage_k
+        small_sample = present & ~regular
+        shrunk = (fpts + k * prior) / (games_played + k)
+        out[fpg_column] = fpg.where(~small_sample, shrunk)
+
+    return out
+
+
 def adp_season(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
     """Add an ADP-derived pseudo-season for players with no history at all.
 
@@ -186,6 +289,8 @@ def compute(frame: pd.DataFrame, config: Config) -> ModelResult:
     prepared = frame
     if config.blank_zero_seasons:
         prepared = blank_zero_seasons(prepared, config)
+    if config.rate_shrinkage:
+        prepared = shrink_rates(prepared, config)
     if config.adp_fallback:
         prepared = adp_season(prepared, config)
 

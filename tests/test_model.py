@@ -31,6 +31,7 @@ def cfg():
         seasons=list(config_module.LEGACY_SEASONS),
         blank_zero_seasons=False,
         adp_fallback=False,
+        rate_shrinkage=False,
     )
 
 
@@ -262,6 +263,97 @@ def test_adp_needs_no_adp_column(current_cfg):
     frame = _newcomer_frame().drop(columns=["ADP"])
     filled = model.adp_season(frame, current_cfg)
     assert filled["adp_FPts"].isna().all()
+
+
+def _rate_shrinkage_frame():
+    """One position (D), enough "regular" players to build a stable prior,
+    plus the specific small-sample cases under test.
+
+    Row order:
+      0..9    regular defenders, 15 games, FP/G clustered around 5.0
+      10      REGULAR_ANCHOR — 15 games, FP/G 9.0 (the pool's genuine best;
+              must NOT move, or the scale's own anchor would be corrupted)
+      11      HOT_STREAK — 1 game, FP/G 10.0 (a fluke; should be pulled down)
+      12      COLD_STREAK — 1 game, FP/G -2.0 (bad luck, not badness; should
+              be pulled UP toward the prior, not left looking like a bust)
+      13      MID_SAMPLE — 5 games, FP/G 5.0 (near the prior already; should
+              barely move)
+
+    All at "2526" (a completed season) with matching, made-up numbers at
+    "2627" (the projection slot) that imply a tiny, meaningless games count —
+    this is what must NOT be shrunk, since it isn't a real observation.
+    """
+    regulars = [
+        {"Name": f"Regular{i}", "Position": "D", "Old Salary": 5000,
+         "2526_FPts": 5.0 * 15 + i, "2526_FP/G": 5.0 + i / 15}
+        for i in range(10)
+    ]
+    specials = [
+        {"Name": "RegularAnchor", "Position": "D", "Old Salary": 9000,
+         "2526_FPts": 9.0 * 15, "2526_FP/G": 9.0},
+        {"Name": "HotStreak", "Position": "D", "Old Salary": 3000,
+         "2526_FPts": 10.0, "2526_FP/G": 10.0},
+        {"Name": "ColdStreak", "Position": "D", "Old Salary": 3000,
+         "2526_FPts": -2.0, "2526_FP/G": -2.0},
+        {"Name": "MidSample", "Position": "D", "Old Salary": 4000,
+         "2526_FPts": 25.0, "2526_FP/G": 5.0},
+    ]
+    frame = pd.DataFrame(regulars + specials)
+    frame.insert(0, "ID", [f"*r{i}*" for i in range(len(frame))])
+    # 2627 (projection): a tiny made-up ratio, so its implied "games played"
+    # (2) would trigger heavy shrinkage if the season-0 exclusion is broken.
+    frame["2627_FPts"] = 6.0
+    frame["2627_FP/G"] = 3.0
+    for key in ("2425", "2324"):
+        frame[f"{key}_FPts"] = float("nan")
+        frame[f"{key}_FP/G"] = float("nan")
+    frame["ADP"] = float("nan")
+    return frame
+
+
+REGULAR_ANCHOR = 10
+HOT_STREAK = 11
+COLD_STREAK = 12
+MID_SAMPLE = 13
+
+
+def test_shrinkage_leaves_established_players_alone(current_cfg):
+    """The point of the min_games cutoff: a real full-season rate is not noise."""
+    frame = _rate_shrinkage_frame()
+    shrunk = model.shrink_rates(frame, current_cfg)
+    assert shrunk.loc[REGULAR_ANCHOR, "2526_FP/G"] == pytest.approx(9.0)
+
+
+def test_shrinkage_pulls_a_small_sample_hot_streak_down(current_cfg):
+    frame = _rate_shrinkage_frame()
+    shrunk = model.shrink_rates(frame, current_cfg)
+    rate = shrunk.loc[HOT_STREAK, "2526_FP/G"]
+    assert rate < 10.0
+    assert rate > 5.0  # still pulled toward, not all the way to, the prior
+
+
+def test_shrinkage_pulls_a_small_sample_cold_streak_up(current_cfg):
+    """A bad one-game sample is bad luck, not proof of being a bad player."""
+    frame = _rate_shrinkage_frame()
+    shrunk = model.shrink_rates(frame, current_cfg)
+    assert shrunk.loc[COLD_STREAK, "2526_FP/G"] > -2.0
+
+
+def test_shrinkage_does_not_touch_the_projection_season(current_cfg):
+    """FPts/FP-G on the projection slot is not a real games-played count."""
+    frame = _rate_shrinkage_frame()
+    shrunk = model.shrink_rates(frame, current_cfg)
+    pd.testing.assert_series_equal(
+        shrunk["2627_FP/G"], frame["2627_FP/G"], check_names=False
+    )
+
+
+def test_shrinkage_can_be_switched_off(cfg):
+    frame = _rate_shrinkage_frame()
+    shrunk = model.shrink_rates(frame, cfg)
+    pd.testing.assert_series_equal(
+        shrunk["2526_FP/G"], frame["2526_FP/G"], check_names=False
+    )
 
 
 def test_current_model_prices_every_player(current_cfg):

@@ -136,6 +136,9 @@ Precedence is **defaults → config file → CLI flags**.
 | `adp_weight` | 0.25 | How much ADP counts, when it counts at all |
 | `adp_max_pick` | 250 | Past this pick ADP is ignored as uninformative |
 | `adp_shrinkage` | 0.7 | Pull-back applied to the fitted ADP curve |
+| `rate_shrinkage` | `true` | Regress a small-sample FP/G toward the positional average |
+| `shrinkage_k` | 7 | Weight of the prior, in games-played terms |
+| `shrinkage_min_games` | 10 | Below this, a season's rate is shrunk; at or above, it's trusted outright |
 
 ---
 
@@ -166,6 +169,30 @@ numbers just lifts third-choice goalkeepers off the floor.
 
 This matters most at **gameweek 0**, because that run's salaries are the ones
 the draft is played with.
+
+---
+
+## Small samples
+
+A rate (FP/G) measured over a handful of games is mostly noise, and it cuts
+both ways: a player who had one brilliant substitute appearance scores
+identically to one who sustained that rate over a full season, and a good
+player who was rotated or injured looks exactly as bad as one who is
+genuinely poor.
+
+**`rate_shrinkage`** regresses a season's FP/G toward the positional average
+whenever the sample is small, weighted by how many games actually back it
+up (`adjusted = (FPts + k·prior) / (GP + k)`, the standard form). A player
+with a real, substantial season (`shrinkage_min_games` or more) keeps their
+own rate untouched — the correction is confined to genuinely small samples,
+not applied to everyone.
+
+This does not fix every case that looks like it should be helped. A player
+with 15-20 games and a modest rate is not a small sample — their number is
+real, and shrinking it would manufacture a correction that isn't there. See
+[`docs/example-run.md`](docs/example-run.md#small-sample-shrinkage) for a
+worked example of both: a genuine one-game fluke that gets corrected, and a
+real-but-modest player who (correctly) doesn't.
 
 ---
 
