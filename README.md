@@ -57,6 +57,9 @@ Look at the report before uploading. To see it without writing anything:
 python -m fantrax_salary.cli --gameweek 3 --dry-run
 ```
 
+See [`docs/example-run.md`](docs/example-run.md) for what that report actually
+looks like — real player prices from the committed data, annotated.
+
 ---
 
 ## The weekly routine
