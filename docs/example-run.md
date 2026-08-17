@@ -1,17 +1,16 @@
 # Example run
 
-What a gameweek-0 run actually produces, so the numbers below can be checked
-against a fresh run rather than taken on faith. All figures are from a real
-`--gameweek 0` run against the committed data
-(`python -m fantrax_salary.cli --gameweek 0 --dry-run`), current as of this
-weighting (20% projection / 60% last season / 15% / 5%, `blank_zero_seasons`,
-`adp_fallback`, and `rate_shrinkage` all on, 2,500 floor).
+A walk through what `--gameweek 0 --dry-run` actually produces, with real
+player names and numbers instead of an abstract description of what the model
+does. Every figure below comes from a real run against the committed data —
+see [Reproduce this](#reproduce-this) at the end to check them yourself.
 
-Run it yourself and compare — see [Preview a run](#preview-a-run) below.
+Current as of: 20% projection / 60% last season / 15% / 5% season weights,
+`blank_zero_seasons`, `adp_fallback`, and `rate_shrinkage` all on, 2,500 floor.
 
 ---
 
-## Top of the pool
+## The top of the pool
 
 | Player | Position | Old salary | New salary |
 | --- | --- | --- | --- |
@@ -22,16 +21,25 @@ Run it yourself and compare — see [Preview a run](#preview-a-run) below.
 | Bruno Guimaraes | M | 11,600 | 11,400 |
 | Gabriel Magalhaes | D | 11,600 | 11,400 |
 | Declan Rice | M | 11,800 | 11,400 |
+| Bukayo Saka | M,F | 11,500 | 11,300 |
 
 Bruno Fernandes sits at the 15,000 ceiling — the model can't price him any
-higher regardless of how much better his score is than the field, because the
-band caps out at the best score in the pool.
+higher no matter how far ahead of the field his score is, because the band
+caps out at the best score in the pool.
+
+## The pool overall
+
+| | |
+| --- | --- |
+| Current total | 2,604,600 |
+| After this run | 2,836,900 (+8.9%) |
+| At the 2,500 floor | 248 of 709 players (35%) |
 
 ## Biggest movers
 
-Risers are mostly players who were parked at the 2,000 template minimum with
-a real 2025-26 record behind them — the model catching up to data that was
-always there, not anything new in this change:
+**Risers** are mostly players parked at the 2,000 template minimum despite a
+real 2025-26 record — the model catching up to data that was always there,
+not anything new about this run:
 
 | Player | Position | Old salary | New salary | Change |
 | --- | --- | --- | --- | --- |
@@ -41,9 +49,9 @@ always there, not anything new in this change:
 | Milan van Ewijk | D | 2,000 | 6,300 | +4,300 |
 | Lukas Hornicek | G | 2,000 | 6,200 | +4,200 |
 
-Fallers are a mix of two different things, both explained below: last year's
-breakouts the projection still rates highly, and single-game flukes that
-`rate_shrinkage` now catches.
+**Fallers** are two different things: last year's breakouts the projection
+still rates too highly, and — new in this run — a single-game fluke that
+`rate_shrinkage` now catches (Walter Benitez, explained below):
 
 | Player | Position | Old salary | New salary | Change |
 | --- | --- | --- | --- | --- |
@@ -53,11 +61,17 @@ breakouts the projection still rates highly, and single-game flukes that
 | Jarrad Branthwaite | D | 9,000 | 7,000 | −2,000 |
 | Alejandro Garnacho | M,F | 7,000 | 5,100 | −1,900 |
 
-## Newcomers priced from draft ADP
+---
 
-Players with no completed Premier League season, priced from where the
-league's own draft has them rather than the bottom of the pool
-(`adp_fallback`, capped at pick 250, shrunk 0.7×):
+## Three mechanisms, one at a time
+
+### Players with no history: draft ADP fills the gap
+
+A Fantrax export gives a player who wasn't in the league last season a
+literal `0.0`, indistinguishable from "played and was useless." For anyone
+with **no completed season at all**, `adp_fallback` prices them off where the
+league's own draft has them instead — fitted from the pool each run, capped
+at pick 250, shrunk 0.7×:
 
 | Player | Position | ADP | Salary |
 | --- | --- | --- | --- |
@@ -68,41 +82,42 @@ league's own draft has them rather than the bottom of the pool
 | Johan Manzambi | M | 78.1 | 4,500 |
 | Oliver McBurnie | F | 97.2 | 4,500 |
 
-Without this, every one of these would price at the 2,500 floor — Fantrax's
-export gives them a literal `0.0` for a season they weren't in the league,
-indistinguishable from "played and was useless." See the README's
-["Players who have never played here"](../README.md#players-who-have-never-played-here)
-for the full reasoning.
+Without this, every one of these prices at the 2,500 floor instead. Full
+reasoning in the README's
+["Players who have never played here"](../README.md#players-who-have-never-played-here).
 
-## Small-sample shrinkage
+### Small samples: a real rate, or noise?
 
-**Walter Benitez, from the fallers table above, is the clearest real example.**
-His entire 2025-26 was one appearance, at exactly 10.00 FP/G — the single
-best rate in the whole pool that season, purely because a great one-game
-sample is indistinguishable from a great *season* to a model that only looks
-at the rate. `rate_shrinkage` pulls it toward what a typical goalkeeper does,
-weighted by how little evidence backs it up: shrinkage alone accounts for
-−700 of his −2,000 move (5,100 → 4,400; the rest is the reweight described
-below).
+A rate stat (FP/G) measured over a handful of games is mostly noise, and it
+cuts both ways — a great one-game substitute appearance looks identical to a
+season sustained at that rate, and a good player who was rotated or injured
+looks exactly as bad as one who is genuinely poor.
 
-The correction runs both ways — a good player who had one bad game is pulled
-back *up* toward the positional average, not left looking like a bust — and
-it's deliberately narrow: a player with a real, substantial season (10+
-games) keeps their own rate untouched. The scale's best full-season rate,
-Bruno Fernandes at 9.79 FP/G, is completely unaffected by this change. See
-`model.shrink_rates` for the mechanics, including an incidental benefit: the
-pool's normalisation range used to be set by two single-game outliers; it's
-now anchored on genuine full-season performances instead.
+**Walter Benitez is the clean real example.** His entire 2025-26 was one
+appearance, at exactly 10.00 FP/G — the single best rate in the whole pool
+that year, purely because one great game is indistinguishable from a great
+season when nothing else is known. `rate_shrinkage` pulls it toward what a
+typical goalkeeper does, weighted by how little evidence backs it up:
+shrinkage alone accounts for −700 of his −2,000 total move (5,100 → 4,400;
+the rest of the drop is the season reweight, described in the README).
 
-## At the floor
+The correction runs both directions — a bad one-game sample gets pulled *up*
+toward the positional average too, not left looking like a bust — and it's
+deliberately narrow: a player with a real, substantial season
+(`shrinkage_min_games`, 10+ games) keeps their own rate exactly as reported.
+Bruno Fernandes's 9.79 FP/G, the pool's best genuine full-season rate, is
+completely untouched by this.
 
-**37% of the pool floors to 2,500, and it is not one population.** Two very
-different situations get collapsed into the identical price, which is worth
-knowing before reading too much into any one floored player:
+**Not every low price is a small sample, though — see Rio Ngumoha below.**
 
-**183 players (74% of the floor) have no signal at all** — no completed
-season, no ADP inside the first 250 picks. This is the floor doing its job:
-there is genuinely nothing to price them on.
+### The floor is not one population
+
+37% of players land at the 2,500 floor is a big enough share to ask what's
+actually in it. It turns out to be two very different situations, collapsed
+into an identical price:
+
+**183 players have no signal at all** — no completed season, no ADP inside
+the first 250 picks. This is the floor doing exactly its job:
 
 | Player | Position | Salary |
 | --- | --- | --- |
@@ -112,11 +127,10 @@ there is genuinely nothing to price them on.
 | Tom Proctor | M | 2,500 |
 | Brandon Austin | G | 2,500 |
 
-**65 players (26% of the floor) have a real, if modest, 2025-26 record —**
-and price identically to the players above despite that. Rio Ngumoha is the
-clearest case: 69.42 FPts at 3.65 FP/G over roughly 19 games, which sits at
-the **34th percentile** of players who played last season — a real rotation
-player, not an unknown.
+**65 players have a real, if modest, 2025-26 record** and still price
+identically to the players above. Rio Ngumoha is the clearest case: 69.42
+FPts at 3.65 FP/G over roughly 19 games — the **34th percentile** of players
+who actually played last season. A real rotation player, not an unknown.
 
 | Player | Position | 2025-26 FPts | FP/G | Salary |
 | --- | --- | --- | --- | --- |
@@ -126,21 +140,22 @@ player, not an unknown.
 | Jorrel Hato | D | 60.34 | 2.74 | 2,500 |
 | Wilfried Gnonto | F | 59.68 | 2.59 | 2,500 |
 
-`rate_shrinkage` (above) does not fix this, and honestly, it shouldn't try
-to: at 19 games, Ngumoha's own rate is a reliable-enough sample, not noise —
-shrinking it would manufacture a correction that isn't there. His price is
-low mainly because his *cumulative* FPts is low, and that's a genuine
-consequence of appearing in only about half the season, which is real
-information, not a data gap. What's actually happening is that the 2,500
-floor is where "genuinely no signal" and "real but below-average" get
-collapsed into one price — a granularity problem at the bottom of the scale,
-distinct from anything fixed here. It's the same mechanism issue #1 in the
-project backlog complains about from the other direction (the floor
-one-way-ratcheting the pool up); this is what it looks like from below.
+**`rate_shrinkage` deliberately doesn't touch this.** At 19 games, Ngumoha's
+own rate is a reliable-enough sample, not noise — shrinking it would
+manufacture a correction that isn't there. His low price comes from his
+*cumulative* total, and that's genuinely low because he played about half a
+season — real information, not a data gap.
+
+What his case actually exposes is a granularity problem at the bottom of the
+scale: "nothing is known" and "a real but below-average season" get priced
+the same. That's the same mechanism project issue #1 complains about from the
+other direction (the floor one-way-ratcheting the pool total up) — this is
+what it looks like from below. Not addressed here; recorded so it isn't
+mistaken for something this run already fixed.
 
 ---
 
-## Preview a run
+## Reproduce this
 
 Compute and print the full report without writing any files:
 
@@ -148,13 +163,11 @@ Compute and print the full report without writing any files:
 python -m fantrax_salary.cli --gameweek 0 --dry-run
 ```
 
-Swap in whatever gameweek you're actually pricing. The report shows the same
-sections as above — scale, pool total, position breakdown, ADP-priced
-newcomers, biggest movers — for the live data currently in `data/`, so it's
-the way to check "what would this actually do" before committing to an
-upload.
+Swap in whatever gameweek you're actually pricing. The report covers the
+same ground as above — scale, pool total, position breakdown, ADP-priced
+newcomers, biggest movers — for whatever data currently sits in `data/`.
 
-To see it against live Fantrax data instead of the checked-in CSVs:
+Against live Fantrax data instead of the checked-in CSVs:
 
 ```bash
 python -m fantrax_salary.cli --gameweek 0 --dry-run --source api
