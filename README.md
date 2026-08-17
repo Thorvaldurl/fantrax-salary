@@ -122,6 +122,41 @@ Precedence is **defaults → config file → CLI flags**.
 | `salary_floor` | 2,500 | Nothing may be priced below this |
 | `damping` | 0.5 | Fraction of the gap to the target applied per run |
 | `seasons[].weight` | 0.70 / 0.25 / 0.04 / 0.01 | How much each season counts |
+| `blank_zero_seasons` | `true` | Read a 0-point, 0-per-game season as "was not here" |
+| `adp_fallback` | `true` | Use draft ADP to price players with no record |
+| `adp_weight` | 0.25 | How much ADP counts, when it counts at all |
+| `adp_max_pick` | 250 | Past this pick ADP is ignored as uninformative |
+| `adp_shrinkage` | 0.7 | Pull-back applied to the fitted ADP curve |
+
+---
+
+## Players who have never played here
+
+A Fantrax export lists every player in the current pool for every season, so
+someone who was not in the league last year comes back as a literal `0.0`
+rather than a blank. Scored as written, "did not play" is indistinguishable
+from "played and was useless" — and **324 of the 709 players in the current
+pool** are in that position, including everyone at the promoted clubs.
+
+Two settings deal with this, and both can be turned off:
+
+- **`blank_zero_seasons`** treats a season of 0 points in 0 games as missing.
+  The weight renormalisation already in the model then prices the player on
+  whatever they *do* have, instead of averaging them against a zero.
+- **`adp_fallback`** brings in the league's own draft. Average draft position
+  is the only independent read available on a player with no Premier League
+  record, and it is available before a ball is kicked. The ADP-to-output curve
+  is fitted from the pool on every run rather than hard-coded, so it
+  re-calibrates each season.
+
+ADP is deliberately limited. It is used only for players with no completed
+season, only inside the first `adp_max_pick` picks, and only at
+`adp_weight`. Past the end of the draft everyone shares an ADP near the bottom
+of the list and 62% of them never play a minute, so reading value into those
+numbers just lifts third-choice goalkeepers off the floor.
+
+This matters most at **gameweek 0**, because that run's salaries are the ones
+the draft is played with.
 
 ---
 

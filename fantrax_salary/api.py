@@ -159,18 +159,24 @@ class FantraxClient:
         return self._rpc("getPlayerStats", data)
 
     def player_stats(self, season_code: Optional[str] = None) -> pd.DataFrame:
-        """Fetch one season as a DataFrame of ID / Player / FPts / FP/G.
+        """Fetch one season as a DataFrame of ID / Player / FPts / FP/G / ADP.
 
         Player ids come back bare from the RPC but are wrapped in asterisks in
         every CSV export (`*03aqp*`), so they are normalised to the CSV form —
         that is what the commissioner template uses as its join key.
         """
         data = self._stats_page(season_code=season_code)
-        header = [cell.get("key") for cell in (data.get("tableHeader") or {}).get("cells", [])]
+        cells = (data.get("tableHeader") or {}).get("cells", [])
+        header = [cell.get("key") for cell in cells]
         try:
             fpts_at, fpg_at = header.index("fpts"), header.index("fptsPerGame")
         except ValueError as exc:
             raise FantraxError(f"unexpected stats columns: {header}") from exc
+        # ADP has no `key` in the payload, only a display name, so it has to be
+        # found by that. Missing entirely is fine — it is an optional signal.
+        adp_at = next(
+            (i for i, cell in enumerate(cells) if cell.get("shortName") == "ADP"), None
+        )
 
         def number(cell: Any) -> Optional[float]:
             text = (cell or {}).get("content")
@@ -188,12 +194,17 @@ class FantraxClient:
             if not scorer_id:
                 continue
             cells = row.get("cells") or []
+
+            def at(index):
+                return number(cells[index]) if index is not None and index < len(cells) else None
+
             rows.append(
                 {
                     "ID": f"*{str(scorer_id).strip('*')}*",
                     "Player": scorer.get("name"),
-                    "FPts": number(cells[fpts_at] if fpts_at < len(cells) else None),
-                    "FP/G": number(cells[fpg_at] if fpg_at < len(cells) else None),
+                    "FPts": at(fpts_at),
+                    "FP/G": at(fpg_at),
+                    "ADP": at(adp_at),
                 }
             )
         if not rows:

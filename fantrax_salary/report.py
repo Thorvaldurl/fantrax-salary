@@ -51,6 +51,23 @@ def build(result: ModelResult, config: Config) -> str:
             f"mean {row.mean_salary:>8,.0f}   max {row.max_salary:>8,.0f}"
         )
 
+    # Newcomers are the players the model knows least about and, at the week-0
+    # run, the ones whose price goes straight into the draft. Worth seeing.
+    if config.adp_fallback and f"{config.adp_key}_FPts" in frame.columns:
+        priced_on_adp = frame[f"{config.adp_key}_FPts"].notna()
+        lines.append(_rule("Priced from draft ADP"))
+        lines.append(
+            f"  players with no record   {int(priced_on_adp.sum()):>4} "
+            f"(ADP inside the first {config.adp_max_pick:,.0f} picks)"
+        )
+        if priced_on_adp.any():
+            shown = frame.loc[priced_on_adp].nlargest(8, "Salary")
+            for _, row in shown.iterrows():
+                lines.append(
+                    f"    {str(row['Name'])[:24]:<24} {str(row['Position']):<4} "
+                    f"ADP {row.get('ADP', float('nan')):>6,.1f}   {row['Salary']:>7,.0f}"
+                )
+
     floored = int((frame["Salary"] <= config.salary_floor).sum())
     capped = int((frame["Salary"] >= config.salary_target_max).sum())
     lines.append(_rule("Distribution"))

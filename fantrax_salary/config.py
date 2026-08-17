@@ -75,6 +75,35 @@ class Config:
     damping: float = 0.5  # fraction of (target - current) applied per run
     rounding: int = -2  # round to nearest 100
 
+    # --- players with no history ------------------------------------------
+    # A Fantrax export gives a player who was not in the league last season a
+    # literal 0.0, not a blank. Scored as written, "did not play" is
+    # indistinguishable from "played and was useless", and 324 of the 709
+    # players in the current pool are in that position.
+    blank_zero_seasons: bool = True
+
+    # Draft ADP as a fallback signal for exactly those players. It is the
+    # league market's own estimate and is the only independent read available
+    # on someone with no Premier League record. See `model.adp_season`.
+    adp_fallback: bool = True
+    adp_weight: float = 0.25  # weight of the ADP pseudo-season, when it applies
+    adp_key: str = "adp"  # column prefix, mirroring a SeasonWeight key
+
+    # Past this pick the draft has stopped expressing an opinion: 10 teams x 25
+    # roster spots is 250 picks, and everyone after that shares an ADP near the
+    # bottom of the list. In the 2025-26 backtest 62% of newcomers with an ADP
+    # over 250 never played a minute, so reading value into those numbers
+    # promotes third-choice keepers off the floor for no reason.
+    adp_max_pick: float = 250.0
+
+    # The ADP curve has to be fitted on players who have a record, and those
+    # players are established squad members: a veteran drafted 200th still
+    # plays, a newcomer drafted 200th often does not. The fitted curve
+    # therefore sits above the newcomer reality and is pulled back toward it.
+    # 0.7 is the middle of the flat region of the backtest (0.6-0.8 are within
+    # 0.01 RMSE of each other); re-check it if the league size changes.
+    adp_shrinkage: float = 0.7
+
     # --- run ---------------------------------------------------------------
     gameweek: int = 1
     dry_run: bool = False
