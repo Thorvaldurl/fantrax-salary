@@ -7,6 +7,11 @@ Players are scored from their fantasy points across several seasons, weighted
 toward the most recent, and each salary then moves part of the way toward that
 score's implied value. Nobody's salary jumps in one step.
 
+> **Note:** the pre-refactor version of this project (the original flat
+> script, before the restructuring into the `fantrax_salary` package) is kept
+> on the [`archive/legacy-main`](../../tree/archive/legacy-main) branch for
+> reference. It is not maintained and should not be built on.
+
 ---
 
 ## Quick start
