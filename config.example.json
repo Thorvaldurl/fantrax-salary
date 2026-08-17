@@ -1,0 +1,45 @@
+{
+  "_comment": "Copy to config.json and pass with --config. Any subset of keys works.",
+
+  "source": "csv",
+  "gameweek": 1,
+
+  "league_id": "0pit050kmss1l8bh",
+  "api_version": "185.2.5",
+
+  "salary_floor": 2500,
+  "salary_target_min": 4000,
+  "salary_target_max": 15000,
+  "damping": 0.5,
+
+  "seasons": [
+    {
+      "key": "2627",
+      "weight": 0.7,
+      "csv": "../current/gw1.csv",
+      "api_code": "PROJECTION_0_926_SEASON",
+      "label": "2026-27 (projected)"
+    },
+    {
+      "key": "2526",
+      "weight": 0.25,
+      "csv": "2526.csv",
+      "api_code": "SEASON_925_YEAR_TO_DATE",
+      "label": "2025-26"
+    },
+    {
+      "key": "2425",
+      "weight": 0.04,
+      "csv": "2425.csv",
+      "api_code": "SEASON_924_YEAR_TO_DATE",
+      "label": "2024-25"
+    },
+    {
+      "key": "2324",
+      "weight": 0.01,
+      "csv": "2324.csv",
+      "api_code": "SEASON_923_YEAR_TO_DATE",
+      "label": "2023-24"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8.0
+# Test-only: the reference implementation still uses MinMaxScaler, so the
+# refactored scaler can be proven equivalent to it.
+scikit-learn>=1.3
