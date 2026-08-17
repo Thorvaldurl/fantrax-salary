@@ -129,6 +129,29 @@ class Config:
     # 0.01 RMSE of each other); re-check it if the league size changes.
     adp_shrinkage: float = 0.7
 
+    # --- small samples -------------------------------------------------------
+    # A rate (FP/G) measured over a handful of games is mostly noise. Without
+    # this, a good player who was rotated or injured scores identically to a
+    # genuinely bad one -- both have a low-games FP/G, and the model has no way
+    # to tell "this is who they are" from "small unrepresentative sample". See
+    # `model.shrink_rates`.
+    rate_shrinkage: bool = True
+
+    # How strongly a season's rate is pulled toward the positional prior:
+    # adjusted = (FPts + k*prior) / (GP + k). k is in the same units as games
+    # played, so 7 means "trust the player's own rate about as much as 7
+    # games' worth of the prior" -- the middle of the 5-10 range that is
+    # standard for this kind of shrinkage. A player with a full season (~35
+    # games) is barely moved; a 1-2 game sample is pulled hard toward the
+    # positional average, in both directions.
+    shrinkage_k: float = 7.0
+
+    # How many games counts as "enough of a sample" to help build the prior
+    # itself. Low-games players are still shrunk (that's the point) -- this
+    # only controls who else in the pool counts as an "established" player
+    # when computing what a typical rate looks like at a position.
+    shrinkage_min_games: int = 10
+
     # --- run ---------------------------------------------------------------
     gameweek: int = 1
     dry_run: bool = False

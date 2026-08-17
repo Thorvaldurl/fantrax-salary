@@ -4,8 +4,8 @@ What a gameweek-0 run actually produces, so the numbers below can be checked
 against a fresh run rather than taken on faith. All figures are from a real
 `--gameweek 0` run against the committed data
 (`python -m fantrax_salary.cli --gameweek 0 --dry-run`), current as of this
-weighting (20% projection / 60% last season / 15% / 5%, `blank_zero_seasons`
-and `adp_fallback` both on, 2,500 floor).
+weighting (20% projection / 60% last season / 15% / 5%, `blank_zero_seasons`,
+`adp_fallback`, and `rate_shrinkage` all on, 2,500 floor).
 
 Run it yourself and compare — see [Preview a run](#preview-a-run) below.
 
@@ -18,10 +18,10 @@ Run it yourself and compare — see [Preview a run](#preview-a-run) below.
 | Bruno Fernandes | M | 15,000 | 15,000 |
 | Erling Haaland | F | 12,500 | 11,900 |
 | Elliot Anderson | M | 12,000 | 11,800 |
-| James Tarkowski | D | 11,500 | 11,600 |
-| Gabriel Magalhaes | D | 11,600 | 11,500 |
-| Declan Rice | M | 11,800 | 11,500 |
-| Bukayo Saka | M,F | 11,500 | 11,400 |
+| James Tarkowski | D | 11,500 | 11,500 |
+| Bruno Guimaraes | M | 11,600 | 11,400 |
+| Gabriel Magalhaes | D | 11,600 | 11,400 |
+| Declan Rice | M | 11,800 | 11,400 |
 
 Bruno Fernandes sits at the 15,000 ceiling — the model can't price him any
 higher regardless of how much better his score is than the field, because the
@@ -35,22 +35,23 @@ always there, not anything new in this change:
 
 | Player | Position | Old salary | New salary | Change |
 | --- | --- | --- | --- | --- |
-| Liam Kitching | D | 2,000 | 6,600 | +4,600 |
-| Dara O'Shea | D | 2,000 | 6,400 | +4,400 |
+| Liam Kitching | D | 2,000 | 6,700 | +4,700 |
+| Dara O'Shea | D | 2,000 | 6,500 | +4,500 |
 | Matt Grimes | M | 2,000 | 6,300 | +4,300 |
+| Milan van Ewijk | D | 2,000 | 6,300 | +4,300 |
 | Lukas Hornicek | G | 2,000 | 6,200 | +4,200 |
-| Milan van Ewijk | D | 2,000 | 6,200 | +4,200 |
 
-Fallers are mostly last year's breakouts the projection still rates highly,
-now pulled back toward what they actually did over a full season:
+Fallers are a mix of two different things, both explained below: last year's
+breakouts the projection still rates highly, and single-game flukes that
+`rate_shrinkage` now catches.
 
 | Player | Position | Old salary | New salary | Change |
 | --- | --- | --- | --- | --- |
-| Valentino Livramento | D | 13,500 | 10,100 | −3,400 |
-| Dominic Solanke | F | 8,400 | 6,400 | −2,000 |
-| Jarrad Branthwaite | D | 9,000 | 7,200 | −1,800 |
-| Alejandro Garnacho | M,F | 7,000 | 5,300 | −1,700 |
-| Wesley Fofana | D | 7,400 | 6,000 | −1,400 |
+| Valentino Livramento | D | 13,500 | 10,000 | −3,500 |
+| Dominic Solanke | F | 8,400 | 6,200 | −2,200 |
+| **Walter Benitez** | **G** | **6,400** | **4,400** | **−2,000** |
+| Jarrad Branthwaite | D | 9,000 | 7,000 | −2,000 |
+| Alejandro Garnacho | M,F | 7,000 | 5,100 | −1,900 |
 
 ## Newcomers priced from draft ADP
 
@@ -60,12 +61,12 @@ league's own draft has them rather than the bottom of the pool
 
 | Player | Position | ADP | Salary |
 | --- | --- | --- | --- |
-| Bobby Thomas | D | 188.7 | 4,700 |
-| Tarik Muharemovic | D | 189.9 | 4,500 |
-| Johan Manzambi | M | 78.1 | 4,400 |
-| Oliver McBurnie | F | 97.2 | 4,400 |
-| Abdul Fatawu | F | 166.3 | 4,300 |
-| Hayden Hackney | M | 153.7 | 4,300 |
+| Bobby Thomas | D | 188.7 | 4,800 |
+| Tarik Muharemovic | D | 189.9 | 4,600 |
+| Abdul Fatawu | F | 166.3 | 4,500 |
+| Hayden Hackney | M | 153.7 | 4,500 |
+| Johan Manzambi | M | 78.1 | 4,500 |
+| Oliver McBurnie | F | 97.2 | 4,500 |
 
 Without this, every one of these would price at the 2,500 floor — Fantrax's
 export gives them a literal `0.0` for a season they weren't in the league,
@@ -73,23 +74,69 @@ indistinguishable from "played and was useless." See the README's
 ["Players who have never played here"](../README.md#players-who-have-never-played-here)
 for the full reasoning.
 
+## Small-sample shrinkage
+
+**Walter Benitez, from the fallers table above, is the clearest real example.**
+His entire 2025-26 was one appearance, at exactly 10.00 FP/G — the single
+best rate in the whole pool that season, purely because a great one-game
+sample is indistinguishable from a great *season* to a model that only looks
+at the rate. `rate_shrinkage` pulls it toward what a typical goalkeeper does,
+weighted by how little evidence backs it up: shrinkage alone accounts for
+−700 of his −2,000 move (5,100 → 4,400; the rest is the reweight described
+below).
+
+The correction runs both ways — a good player who had one bad game is pulled
+back *up* toward the positional average, not left looking like a bust — and
+it's deliberately narrow: a player with a real, substantial season (10+
+games) keeps their own rate untouched. The scale's best full-season rate,
+Bruno Fernandes at 9.79 FP/G, is completely unaffected by this change. See
+`model.shrink_rates` for the mechanics, including an incidental benefit: the
+pool's normalisation range used to be set by two single-game outliers; it's
+now anchored on genuine full-season performances instead.
+
 ## At the floor
 
-Players with no usable signal anywhere — no season record, no ADP inside the
-first 250 picks (or no ADP at all):
+**37% of the pool floors to 2,500, and it is not one population.** Two very
+different situations get collapsed into the identical price, which is worth
+knowing before reading too much into any one floored player:
+
+**183 players (74% of the floor) have no signal at all** — no completed
+season, no ADP inside the first 250 picks. This is the floor doing its job:
+there is genuinely nothing to price them on.
 
 | Player | Position | Salary |
 | --- | --- | --- |
-| Malachi Hardy | D | 2,500 |
-| Nilson Angulo | M,F | 2,500 |
-| Jeremy Monga | M,F | 2,500 |
-| Rio Ngumoha | F | 2,500 |
-| Aidan Dausch | F | 2,500 |
+| Chuba Akpom | F | 2,500 |
+| Sean Steur | M | 2,500 |
+| Dermot Mee | G | 2,500 |
+| Tom Proctor | M | 2,500 |
+| Brandon Austin | G | 2,500 |
 
-This is currently **37% of the pool** — the largest known weakness left in
-the model (issue #3: no small-sample shrinkage, and issue #1: the floor is
-what drives most of the remaining pool inflation). Not addressed by this
-change; flagged here rather than hidden.
+**65 players (26% of the floor) have a real, if modest, 2025-26 record —**
+and price identically to the players above despite that. Rio Ngumoha is the
+clearest case: 69.42 FPts at 3.65 FP/G over roughly 19 games, which sits at
+the **34th percentile** of players who played last season — a real rotation
+player, not an unknown.
+
+| Player | Position | 2025-26 FPts | FP/G | Salary |
+| --- | --- | --- | --- | --- |
+| Ao Tanaka | M | 94.43 | 3.37 | 2,500 |
+| Andrey Santos | M | 83.26 | 3.08 | 2,500 |
+| Rio Ngumoha | F | 69.42 | 3.65 | 2,500 |
+| Jorrel Hato | D | 60.34 | 2.74 | 2,500 |
+| Wilfried Gnonto | F | 59.68 | 2.59 | 2,500 |
+
+`rate_shrinkage` (above) does not fix this, and honestly, it shouldn't try
+to: at 19 games, Ngumoha's own rate is a reliable-enough sample, not noise —
+shrinking it would manufacture a correction that isn't there. His price is
+low mainly because his *cumulative* FPts is low, and that's a genuine
+consequence of appearing in only about half the season, which is real
+information, not a data gap. What's actually happening is that the 2,500
+floor is where "genuinely no signal" and "real but below-average" get
+collapsed into one price — a granularity problem at the bottom of the scale,
+distinct from anything fixed here. It's the same mechanism issue #1 in the
+project backlog complains about from the other direction (the floor
+one-way-ratcheting the pool up); this is what it looks like from below.
 
 ---
 
