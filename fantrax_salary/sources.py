@@ -56,7 +56,12 @@ def base_frame(template: pd.DataFrame) -> pd.DataFrame:
 
 
 def _merge(frame: pd.DataFrame, stats: Dict[str, pd.DataFrame], config: Config) -> pd.DataFrame:
-    """Attach each season's FPts and FP/G as its own pair of columns."""
+    """Attach each season's FPts and FP/G as its own pair of columns.
+
+    Draft ADP rides along from the current-season export, which is the one
+    carrying the upcoming draft's average pick. It is not part of the score
+    itself; `model.adp_season` decides whether any given player needs it.
+    """
     for season in config.seasons:
         source = stats[season.key]
         missing = {"ID", "FPts", "FP/G"} - set(source.columns)
@@ -69,7 +74,21 @@ def _merge(frame: pd.DataFrame, stats: Dict[str, pd.DataFrame], config: Config) 
             on="ID",
             how="left",
         )
+
+    current = stats[config.seasons[0].key]
+    if "ADP" in current.columns:
+        frame = frame.merge(current[["ID", "ADP"]], on="ID", how="left")
+    else:
+        frame["ADP"] = pd.NA
+    frame["ADP"] = _numeric(frame["ADP"])
     return frame
+
+
+def _numeric(series: pd.Series) -> pd.Series:
+    """Fantrax exports thousands separators inside quoted numbers."""
+    if series.dtype.kind in "fi":
+        return series
+    return pd.to_numeric(series.astype(str).str.replace(",", "", regex=False), errors="coerce")
 
 
 def from_csv(config: Config) -> pd.DataFrame:
