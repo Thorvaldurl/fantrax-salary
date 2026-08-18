@@ -147,8 +147,9 @@ Precedence is **defaults → config file → CLI flags**.
 A Fantrax export lists every player in the current pool for every season, so
 someone who was not in the league last year comes back as a literal `0.0`
 rather than a blank. Scored as written, "did not play" is indistinguishable
-from "played and was useless" — and **324 of the 709 players in the current
-pool** are in that position, including everyone at the promoted clubs.
+from "played and was useless" — and **298 of the 709 players in the current
+pool** have no record in any completed season, including everyone at the
+promoted clubs.
 
 Two settings deal with this, and both can be turned off:
 
@@ -202,15 +203,15 @@ The heaviest input used to be Fantrax's preseason projection, at 70%. It is now
 20%, with 60% on last season's actual results.
 
 The projection is not neutral. Moving weight onto real results drops
-goalkeepers by around 2,500 (Petrovic 10,500 → 8,000, Martinez 9,500 → 6,800)
+goalkeepers by around 3,000 (Petrovic 10,500 → 7,700, Martinez 9,500 → 6,500)
 and lifts attackers (Haaland 10,800 → 11,900) — it was stacking a second
 positional bias on top of the one already present in the scoring system, which
 [`docs/scoring-review.md`](docs/scoring-review.md) measures.
 
 It is not dropped to zero because the promoted clubs have no Premier League
 record at all, and the projection is the only thing standing between their
-squads and the floor. At 0% the number of floored players rises to 335, against
-264 at the current weighting and 295 under the old one.
+squads and the floor. At 0% the number of floored players rises to 336, against
+248 at the current weighting and 292 under the old one.
 
 **During the season, the fix is the export, not the config** — take the
 "- YTD" view rather than "Projected - Season" (see the weekly routine above)
@@ -231,9 +232,9 @@ At the current weighting:
 
 | | |
 | --- | --- |
-| Best possible 15 | 166,300 — **166% of the cap** |
+| Best possible 15 | 165,000 — **165% of the cap** |
 | Cheapest legal 15 | 37,500 — 38% |
-| All 150 rostered players | 1,162,200 — **116% of all ten caps** |
+| All 150 rostered players | 1,141,700 — **114% of all ten caps** |
 
 So a manager can afford roughly **half** the distance from the worst legal
 squad to the best, and the league collectively cannot buy the whole desirable
@@ -241,7 +242,7 @@ pool — good players are left on the market. That is the intended behaviour.
 
 Worth re-checking if the roster size, cap, or floor ever change: at a 25-man
 squad the 2,500 floor alone would commit 62,500 of the 100,000 cap, and the
-affordable share collapses from ~50% to ~17%.
+affordable share collapses from ~50% to ~19%.
 
 ---
 
@@ -262,7 +263,15 @@ data/
   current/     the in-progress season export
 tests/
   reference_implementation.py   the original script, kept as a test oracle
-  test_model.py                 asserts the refactor changed no numbers
+  test_model.py                 pins the original arithmetic and tests
+                                 everything since (newcomer pricing, ADP
+                                 fallback, shrinkage, validation)
+docs/
+  example-run.md       a real run, annotated, with reproduction steps
+  scoring-review.md     league scoring-balance analysis (nothing implemented
+                         here — a Fantrax commissioner action, not code)
+analysis/
+  scoring_review/       the standalone engine + cached data behind the above
 output/        generated; git-ignored
 ```
 
@@ -280,6 +289,8 @@ file otherwise produces plausible-looking numbers rather than an error:
 - the template has the expected columns, no duplicate ids, numeric salaries
 - every season actually matched some players — a wholly unmatched file is fatal
 - no player is left without stats in any season
+- the current-season file doesn't look like a leftover preseason projection
+  once games have actually been played (see the weekly routine above)
 - stats files are warned about when stale, or older than the template they are
   being joined to
 
@@ -299,9 +310,12 @@ pytest
 ```
 
 The original script is preserved at `tests/reference_implementation.py` and used
-as the oracle: the suite asserts the restructured pipeline reproduces its output
-exactly, salary for salary. That is what makes this refactor safe to trust, and
-what will make a future scoring change provably deliberate.
+as the oracle: with every setting above switched off (`blank_zero_seasons`,
+`adp_fallback`, `rate_shrinkage`, and the original season weights), the suite
+asserts the pipeline reproduces its output exactly, salary for salary. A normal
+run does not match it — that's the point. Everything that's since made it
+diverge deliberately is itself under test, so a future scoring change is
+provably intended rather than accidental.
 
 ---
 
@@ -333,8 +347,16 @@ python -m fantrax_salary.cli --list-seasons
 
 ## Known issues with the scoring
 
-The model's *arithmetic* is unchanged by the current restructuring, but several
-weaknesses are documented and open — pool-wide salary inflation, a strong
-positional bias, outlier sensitivity, and the fact that the highest-weighted
-input is Fantrax's **projections** rather than results. See the repository
-issues before changing any weights.
+The model's arithmetic has been deliberately changed a few times since the
+restructuring — the season weights, newcomer pricing, and small-sample
+shrinkage above are all departures from the original script, each landed with
+the reference-implementation test updated on purpose, so the change is
+visible and intended rather than accidental.
+
+What's fixed and what's still open is tracked in
+[issue #2](../../issues/2) and kept current there rather than duplicated here,
+since a status list in a README drifts out of date exactly like the numbers
+above did. Roughly: small-sample shrinkage and the dead tail-season weights
+are done; the pool-wide inflation ratchet, positional bias in the *model*
+(as opposed to the scoring settings — see `docs/scoring-review.md`), and a
+few smaller items are not.
