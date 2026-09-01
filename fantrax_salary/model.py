@@ -112,16 +112,20 @@ def shrink_rates(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
     "how much did they actually play", which is a separate and real signal
     the model should keep.
 
-    Applied to completed seasons only (`config.seasons[1:]`, the same
-    convention `adp_season` uses). `FPts / FP-per-G` is not a real games-played
-    count for `seasons[0]`, the in-progress/preseason slot — it is a
-    projection, and its ratio is an artefact of whatever Fantrax's forecast
-    happens to divide to, not a sample size. Shrinking it as though it were
-    one is actively wrong: it very nearly re-broke the case this function
-    exists to fix, because a fringe player's tiny *implied* "games played" in
-    the projection column dragged their projected rate down hard for no
-    real reason, even while the actual-season correction was working exactly
-    as intended.
+    Applied to every slot holding actual results, and to no slot holding a
+    forecast (`SeasonWeight.is_projection`). `FPts / FP-per-G` is a real
+    games-played count in the first case and an artefact of whatever Fantrax's
+    forecast happens to divide to in the second. Shrinking a projection is
+    actively wrong: it very nearly re-broke the case this function exists to
+    fix, because a fringe player's tiny *implied* "games played" in the
+    projection column dragged their projected rate down hard for no real
+    reason, even while the actual-season correction was working as intended.
+
+    The test is what the slot *holds*, not where it sits in the list. The
+    in-progress season is a projection before a ball is kicked and actuals
+    afterwards, and once it flips it becomes the smallest sample in the whole
+    model — at gameweek 3, two games. Excluding it by position rather than by
+    content is what let a two-game newcomer out-score Haaland.
 
     Only players below `shrinkage_min_games` are touched at all — a player at
     or above the threshold keeps their own rate exactly as reported. This is
@@ -151,7 +155,40 @@ def shrink_rates(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
 
     out = frame.copy()
     position = out["Position"].fillna("").str.split(",").str[0].str.strip().str.upper()
-    completed = config.seasons[1:] or config.seasons
+    # `seasons[0]` is the in-progress slot, and whether it belongs here depends
+    # entirely on what is in it. A projection must be excluded (see above). Real
+    # year-to-date actuals must NOT be: early in a season that slot holds the
+    # smallest sample anywhere in the model -- two or three games -- which is
+    # precisely what this function exists for. Leaving it out at gameweek 3
+    # priced a two-game newcomer above Haaland.
+    completed = [s for s in config.seasons if not s.is_projection] or config.seasons
+
+    # A season's prior comes from its own established players where it has any.
+    # An in-progress season has none by construction -- at gameweek 3 the whole
+    # league is on 2 games, so nobody clears `shrinkage_min_games` and the
+    # season can build no prior at all. That used to mean the column was
+    # skipped, which quietly made the whole `is_projection` distinction above
+    # do nothing for the first ten gameweeks of every season.
+    #
+    # FP/G is a rate, so a positional prior carries across seasons unchanged:
+    # "what a typical established defender scores per game" is the same claim
+    # whichever completed season measured it. A season that cannot build its
+    # own therefore borrows from the most recent one that can, which is the
+    # nearest available answer to the same question.
+    priors = {}
+    for season in completed:
+        fpts, fpg = out[f"{season.key}_FPts"], out[f"{season.key}_FP/G"]
+        games_played = (fpts / fpg).round()
+        regular = (
+            fpts.notna() & fpg.notna() & (games_played > 0)
+            & (games_played >= config.shrinkage_min_games)
+        )
+        pool_prior = fpg[regular].mean()
+        if pd.isna(pool_prior):
+            continue
+        priors[season.key] = (
+            fpg.where(regular).groupby(position).transform("mean").fillna(pool_prior)
+        )
 
     for season in completed:
         fpts_column, fpg_column = f"{season.key}_FPts", f"{season.key}_FP/G"
@@ -162,11 +199,15 @@ def shrink_rates(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
         if not present.any():
             continue
 
+        prior = priors.get(season.key)
+        if prior is None:
+            # Fall back to the nearest season that could build one. `completed`
+            # is newest-first, so this is the most recent completed season.
+            prior = next((priors[s.key] for s in completed if s.key in priors), None)
+        if prior is None:
+            continue  # no season in the pool has enough data to anchor anything
+
         regular = present & (games_played >= config.shrinkage_min_games)
-        pool_prior = fpg[regular].mean()
-        if pd.isna(pool_prior):
-            continue  # not enough data this season to build any prior at all
-        prior = fpg.where(regular).groupby(position).transform("mean").fillna(pool_prior)
 
         # Only the small-sample rows are touched. A player who has cleared
         # `shrinkage_min_games` keeps their own rate outright — that threshold
@@ -211,9 +252,11 @@ def adp_season(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
         return out
 
     adp = pd.to_numeric(out["ADP"], errors="coerce")
-    # seasons[0] is the in-progress season, which preseason is a projection —
-    # having one of those is not a record. History means a completed season.
-    completed = config.seasons[1:] or config.seasons
+    # seasons[0] is the in-progress season — a projection preseason, and a
+    # handful of games once it starts. Neither is a record: "has history" means
+    # a *completed* season, so this stays positional on purpose and does not
+    # use `is_projection` the way `shrink_rates` does.
+    completed = config.seasons[1:]
     has_history = pd.concat(
         [out[f"{s.key}_FPts"].notna() for s in completed], axis=1
     ).any(axis=1)
@@ -323,6 +366,12 @@ def compute(frame: pd.DataFrame, config: Config) -> ModelResult:
     span = config.salary_target_max - config.salary_target_min
     multiplier = span / ((max_score / mean_score) - 1)
     target = config.salary_target_min + (data["WeightedScore"] / mean_score - 1) * multiplier
+    # NaN passes through here as the floor, and that is load-bearing: a player
+    # with no record in any season scores NaN, and NaN fails `>=`. So an
+    # unknown player gets a floor *target* and then eases toward it through the
+    # damping below like anyone else, rather than snapping to it. Forcing the
+    # floor directly onto their salary instead skips that damping and changes
+    # the numbers -- the reference-implementation test catches exactly that.
     data["TargetSalary"] = target.where(target >= config.salary_floor, config.salary_floor)
 
     # Ease toward the target instead of snapping to it, so a single unusual
@@ -330,6 +379,14 @@ def compute(frame: pd.DataFrame, config: Config) -> ModelResult:
     salary = data["Old Salary"] + (data["TargetSalary"] - data["Old Salary"]) * config.damping
     salary = salary.round(config.rounding)
     data["Salary"] = salary.where(salary >= config.salary_floor, config.salary_floor)
+
+    # Existing contracts are not repriced. This is deliberately the last step:
+    # rostered players still contribute their scores to `max_score`/`mean_score`
+    # above, so the scale free agents are priced against is the whole league,
+    # not just the part of it that happens to be unowned.
+    if config.freeze_rostered and "Rostered" in data.columns:
+        owned = data["Rostered"].fillna(False).astype(bool)
+        data["Salary"] = data["Salary"].where(~owned, data["Old Salary"])
 
     return ModelResult(
         frame=data,

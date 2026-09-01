@@ -41,6 +41,19 @@ class SeasonWeight:
     api_code: str
     label: str
 
+    @property
+    def is_projection(self) -> bool:
+        """Whether this slot holds a forecast rather than played football.
+
+        `FPts / FP-per-G` is a real games-played count for an actuals slot and
+        an artefact of whatever the forecast divides to for a projection one,
+        so anything reasoning about sample size has to know which it is. The
+        `api_code` is the single place that distinguishes them, and it stays
+        the declaration of intent in CSV mode too -- flipping the slot off the
+        projection is the same edit for both sources.
+        """
+        return self.api_code.startswith("PROJECTION_")
+
 
 # NOTE: the ordering here is newest-first and is load-bearing only for display.
 # `key` values are kept identical to the original script so that column names,
@@ -61,8 +74,17 @@ class SeasonWeight:
 #
 # The two oldest seasons were 0.04 and 0.01, which moved a score by well under
 # 1% -- decoration rather than signal. They now do something.
+#
+# On the current-season slot: it held `PROJECTION_0_926_SEASON` up to and
+# including the gameweek-0 draft run, because before a ball is kicked the
+# projection is the only thing that exists. Once games have been played it is
+# the wrong input -- it is a forecast of the whole season, so it neither moves
+# with results nor implies the right number of games, and `validate
+# .check_current_season_is_results` exists to catch it being left here. It is
+# now the year-to-date actuals, which is what the README's weekly routine has
+# always prescribed for an in-season run.
 DEFAULT_SEASONS: List[SeasonWeight] = [
-    SeasonWeight("2627", 0.20, "../current/gw1.csv", "PROJECTION_0_926_SEASON", "2026-27 (projected)"),
+    SeasonWeight("2627", 0.20, "../current/gw1.csv", "SEASON_926_YEAR_TO_DATE", "2026-27 (YTD)"),
     SeasonWeight("2526", 0.60, "2526.csv", "SEASON_925_YEAR_TO_DATE", "2025-26"),
     SeasonWeight("2425", 0.15, "2425.csv", "SEASON_924_YEAR_TO_DATE", "2024-25"),
     SeasonWeight("2324", 0.05, "2324.csv", "SEASON_923_YEAR_TO_DATE", "2023-24"),
@@ -71,7 +93,15 @@ DEFAULT_SEASONS: List[SeasonWeight] = [
 # The original script's weighting, kept so the reference-implementation test can
 # pin the legacy arithmetic exactly. Not used by a normal run.
 LEGACY_SEASONS: List[SeasonWeight] = [
-    replace(DEFAULT_SEASONS[0], weight=0.70),
+    # The original script ran off the preseason projection, so the legacy slot
+    # keeps that code explicitly rather than inheriting whatever the current
+    # season has moved on to.
+    replace(
+        DEFAULT_SEASONS[0],
+        weight=0.70,
+        api_code="PROJECTION_0_926_SEASON",
+        label="2026-27 (projected)",
+    ),
     replace(DEFAULT_SEASONS[1], weight=0.25),
     replace(DEFAULT_SEASONS[2], weight=0.04),
     replace(DEFAULT_SEASONS[3], weight=0.01),
@@ -87,7 +117,15 @@ class Config:
     output_dir: Path = REPO_ROOT / "output"
 
     # --- data source -------------------------------------------------------
-    source: str = "csv"  # "csv" | "api"
+    # "api" is the correct source for a multi-season blend: each Fantrax season
+    # is a separate archival league with its own frozen scoring settings, so a
+    # hand-exported CSV for anything but the current season can never reflect
+    # a scoring change no matter when it's re-exported (see README, "Which
+    # source should I use?"). Querying an old season through the *current*
+    # league's api_code is the one path that re-scores it under today's rules.
+    # `getPlayerStats`, which this uses, was checked and does not rate-limit
+    # (unlike the per-game-log endpoint) -- see analysis/scoring_review/README.md.
+    source: str = "api"  # "csv" | "api"
     league_id: str = CURRENT_LEAGUE_ID
     api_version: str = DEFAULT_API_VERSION
 
@@ -151,6 +189,21 @@ class Config:
     # only controls who else in the pool counts as an "established" player
     # when computing what a typical rate looks like at a position.
     shrinkage_min_games: int = 10
+
+    # --- rostered players ---------------------------------------------------
+    # A player already on a manager's roster was bought at a price, and that
+    # price is the term of the deal -- repricing them mid-season moves money in
+    # a squad that has already been paid for. Only free agents are repriced, so
+    # the salary update prices *the market*, not existing contracts.
+    #
+    # Their score is still computed, and they still count toward the scale that
+    # everyone else is priced against; it is only the written salary that is
+    # held at what the template already says.
+    #
+    # Rosters come from the *documented* `/fxea/general/getTeamRosters`, which
+    # needs no auth and no client version, so this cannot be broken by the
+    # `STALE_CLIENT` drift that affects the statistics endpoint.
+    freeze_rostered: bool = True
 
     # --- run ---------------------------------------------------------------
     gameweek: int = 1

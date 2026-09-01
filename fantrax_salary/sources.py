@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict
 
 import pandas as pd
+import requests
 
 from .config import Config
 
@@ -102,7 +103,8 @@ def from_csv(config: Config) -> pd.DataFrame:
                 "Export it from Fantrax with 'All players' selected (not just available)."
             )
         stats[season.key] = pd.read_csv(path)
-    return _merge(base_frame(template), stats, config)
+    frame = _merge(base_frame(template), stats, config)
+    return _attach_rosters(frame, config)
 
 
 def from_api(config: Config) -> pd.DataFrame:
@@ -112,7 +114,38 @@ def from_api(config: Config) -> pd.DataFrame:
     template = load_template(config)
     client = FantraxClient(config.league_id, config.api_version)
     stats = {season.key: client.player_stats(season.api_code) for season in config.seasons}
-    return _merge(base_frame(template), stats, config)
+    frame = _merge(base_frame(template), stats, config)
+    return _attach_rosters(frame, config)
+
+
+def _attach_rosters(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
+    """Mark which players are already owned, and how the lookup went.
+
+    Kept out of `_merge` because it is the one input that is fetched over the
+    network in *both* source modes: the roster endpoint is documented, needs no
+    auth, and has no offline equivalent -- CSV mode has no exported roster file
+    to read. `roster_error` carries the reason up to validation rather than
+    being swallowed here, so a failed lookup surfaces as a warning about
+    unfrozen squads instead of a silent False.
+    """
+    frame["Rostered"] = False
+    frame.attrs["roster_error"] = None
+    frame.attrs["roster_unmatched"] = 0
+    if not config.freeze_rostered:
+        return frame
+
+    from .api import FantraxClient
+    from .errors import FantraxError
+
+    try:
+        owned = FantraxClient(config.league_id, config.api_version).rostered_ids()
+    except (FantraxError, requests.RequestException, ValueError) as exc:
+        frame.attrs["roster_error"] = str(exc)
+        return frame
+
+    frame["Rostered"] = frame["ID"].isin(owned)
+    frame.attrs["roster_unmatched"] = len(owned - set(frame["ID"]))
+    return frame
 
 
 def load(config: Config) -> pd.DataFrame:

@@ -67,46 +67,54 @@ looks like — real player prices from the committed data, annotated.
 1. **Download the commissioner template.** Fantrax → League → Commissioner →
    Player Salaries → Export. Save it over `data/template/blank_2026-27.csv`.
    This file is both the list of players to price *and* the exact layout the
-   upload must be in, so it is never reshaped.
-2. **Download the current stats.** Fantrax → Players, with **All players**
-   selected — not just available. Save over `data/current/gw1.csv`.
+   upload must be in, so it is never reshaped. There is no API for this step —
+   it is always a manual export, `--source api` or not.
+2. **Run it** with `--gameweek N` (the default `--source api` pulls live
+   statistics — no further downloads needed) and read the report.
+3. **Upload** `output/SalGWN.csv` back into Fantrax.
 
-   > **Check the Stats dropdown.** It defaults to **"Projected - Season"**,
-   > which is Fantrax's *forecast of the whole season*, not results. Once the
-   > season has started you want **"2026-27 - YTD"**. An export taken on the
-   > default looks completely normal, so the run warns if the file implies far
-   > more football than has actually been played.
-3. **Run it** with `--gameweek N` and read the report.
-4. **Upload** `output/SalGWN.csv` back into Fantrax.
-
-Or skip steps 2 and 3's staleness risk entirely with `--source api` — see below.
+`--source csv` is still available if you'd rather work offline — see
+[Which source should I use?](#which-source-should-i-use) — but it needs a
+second manual export (Fantrax → Players, **All players** selected, Stats
+dropdown set to **"- YTD"** and not the default "Projected - Season") and,
+for any season but the current one, can never be made to reflect a scoring
+change no matter how often it's re-exported.
 
 ---
 
 ## Which source should I use?
 
 ```bash
-python -m fantrax_salary.cli --gameweek 3               # csv (default)
-python -m fantrax_salary.cli --gameweek 3 --source api  # live from Fantrax
+python -m fantrax_salary.cli --gameweek 3               # api (default)
+python -m fantrax_salary.cli --gameweek 3 --source csv  # hand-exported files
 ```
 
-**`csv`** reads the hand-exported files in `data/`. Reproducible, offline, and
-the only mode whose numbers match historical runs.
-
-**`api`** pulls the same statistics live. No manual downloads and nothing can go
-stale — but the numbers differ, for a reason worth understanding:
+**`api`** pulls live statistics from Fantrax and is now the default. No manual
+downloads, and nothing can go stale — because of a reason worth understanding:
 
 > Each Fantrax season is a *separate league* with its own scoring settings, and
 > an export is always scored under the rules of the league it came from. The
 > checked-in `2425.csv` was exported from the 2024-25 league, so it is scored
-> under *that* season's rules. Requesting 2024-25 through the current league
-> instead returns the same matches re-scored under **today's** rules — which is
-> what you actually want when comparing seasons. The two differ by about 3
-> fantasy points per player on average, and they disagree for 258 of the 361
-> players present in both.
+> under *that* season's rules, permanently — re-exporting it later doesn't
+> help, because that archival league's settings are frozen. Requesting 2024-25
+> through the *current* league instead returns the same matches re-scored under
+> **today's** rules — which is what you actually want when comparing seasons.
+> The two differ by about 3 fantasy points per player on average, and they
+> disagreed for 258 of the 361 players present in both, at the time this was
+> measured.
 
-So `api` is the more *correct* input and `csv` is the more *reproducible* one.
-The default stays `csv` until a scoring change is deliberately adopted.
+**`csv`** reads the hand-exported files in `data/`. Fully offline, and the only
+mode that doesn't depend on Fantrax's undocumented internal RPC staying stable
+— but for any season except the current one, no amount of re-exporting can make
+it reflect a scoring change, since the file it reads from is permanently locked
+to that season's own now-archived league. It's kept as an option for that
+offline/reproducibility case, not because it's more correct.
+
+The default was `csv` until this project's own scoring review led to an actual
+scoring change being adopted — see [`docs/scoring-review.md`](docs/scoring-review.md)
+— at which point `csv`'s three older, unfixable-by-re-export seasons (weighted
+0.80 of the blended score, see `DEFAULT_SEASONS`) made it the wrong default to
+leave in place.
 
 ---
 
@@ -136,6 +144,7 @@ Precedence is **defaults → config file → CLI flags**.
 | `adp_weight` | 0.25 | How much ADP counts, when it counts at all |
 | `adp_max_pick` | 250 | Past this pick ADP is ignored as uninformative |
 | `adp_shrinkage` | 0.7 | Pull-back applied to the fitted ADP curve |
+| `freeze_rostered` | `true` | Leave players already on a roster at their current salary |
 | `rate_shrinkage` | `true` | Regress a small-sample FP/G toward the positional average |
 | `shrinkage_k` | 7 | Weight of the prior, in games-played terms |
 | `shrinkage_min_games` | 10 | Below this, a season's rate is shrunk; at or above, it's trusted outright |
@@ -172,6 +181,31 @@ This matters most at **gameweek 0**, because that run's salaries are the ones
 the draft is played with.
 
 ---
+
+## Rostered players are not repriced
+
+A player already on a manager's roster was bought at a price, and that price
+is the term of the deal. Repricing them mid-season moves money around inside a
+squad that has already been paid for, so **`freeze_rostered`** holds every
+owned player at whatever the template already says and reprices only free
+agents — the salary update prices *the market*, not existing contracts.
+
+Owned players are still scored, and still count toward the scale everyone else
+is priced against. Dropping them from the pool entirely would reprice the whole
+league against a smaller and unrepresentative sample, which is a much bigger
+change than the one intended; only the written salary is held.
+
+Rosters come from `/fxea/general/getTeamRosters` — the *documented* API, which
+needs no auth and carries no client version, so this particular lookup cannot
+be broken by the `STALE_CLIENT` drift that affects the statistics endpoint. It
+is a live lookup in both `--source` modes, since there is no roster export to
+read offline. If it fails the run stops rather than silently repricing all ten
+squads; set `freeze_rostered` to `false` in a config file to reprice everyone
+on purpose.
+
+The commissioner template is exported before the rosters are read, so a player
+transferred in between shows up as "not in the template" and is warned about —
+re-export the template if a squad has changed.
 
 ## Small samples
 
@@ -288,7 +322,12 @@ file otherwise produces plausible-looking numbers rather than an error:
 
 - the template has the expected columns, no duplicate ids, numeric salaries
 - every season actually matched some players — a wholly unmatched file is fatal
-- no player is left without stats in any season
+- players with no stats in any season are counted: a *majority* of the pool
+  means the ids do not line up and is fatal, while a minority is just genuine
+  newcomers and only warns, since the model already prices them toward the
+  floor. It used to be fatal either way, which taught the operator to reach
+  for `--force` — and `--force` silences every other check in this list too
+- team rosters were actually readable, so existing contracts can be held
 - the current-season file doesn't look like a leftover preseason projection
   once games have actually been played (see the weekly routine above)
 - stats files are warned about when stale, or older than the template they are

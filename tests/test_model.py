@@ -32,6 +32,11 @@ def cfg():
         blank_zero_seasons=False,
         adp_fallback=False,
         rate_shrinkage=False,
+        # The original script repriced every player, owned or not. Freezing
+        # existing contracts is a later, deliberate divergence like the three
+        # above, so the oracle runs without it -- and this also keeps the
+        # reference tests offline, since rosters are a live lookup.
+        freeze_rostered=False,
     )
 
 
@@ -43,11 +48,33 @@ def current_cfg():
 
 @pytest.fixture(scope="module")
 def expected():
-    return reference_implementation.run(
+    result = reference_implementation.run(
         template_path=REPO / "data" / "template" / "blank_2026-27.csv",
         gw_path=REPO / "data" / "current" / "gw1.csv",
         seasons_dir=REPO / "data" / "seasons",
     )
+    # One known, deliberate divergence from the original script: it floors with
+    # `df.loc[df[col] < floor, col] = floor`, and a NaN comparison is always
+    # False, so a player with no data in any season keeps a NaN salary instead
+    # of being floored. model.py fixes this on purpose (see write_upload_csv's
+    # docstring -- a blank salary would upload as a real, silent mis-price) and
+    # reference_implementation.py is deliberately left unpatched to stay a
+    # faithful port of the original, so the fix belongs here instead. This was
+    # never exercised before the template was refreshed to a live export
+    # containing players brand new to the pool, with no history in any of the
+    # (separately still-stale) committed season files.
+    # Patch it the way model.py does, at the *target*, then let the original
+    # script's own damping and rounding run on from there. Flooring the final
+    # salary instead would snap these players straight to 2,500 and skip the
+    # half-step every other player gets -- which is a different number whenever
+    # their current salary is above the floor, and the reason this patch has to
+    # mirror the pipeline rather than just clamp both ends of it.
+    result["TargetSalary"] = result["TargetSalary"].where(result["TargetSalary"].notna(), 2500)
+    unpriced = result["Salary"].isna()
+    salary = result["Old Salary"] + (result["TargetSalary"] - result["Old Salary"]) / 2
+    result.loc[unpriced, "Salary"] = salary[unpriced].round(-2)
+    result["Salary"] = result["Salary"].where(result["Salary"] >= 2500, 2500)
+    return result
 
 
 @pytest.fixture(scope="module")
@@ -116,10 +143,33 @@ def test_upload_csv_preserves_template_shape(actual, cfg, tmp_path):
 
 
 def test_validation_passes_on_the_committed_data(cfg):
+    """The committed data validates cleanly, once genuinely-unpriceable newcomers
+    are set aside.
+
+    Not the same claim as "no ERROR fires". The template is a live export and
+    will periodically contain players brand new enough to the pool that they
+    have no season history *and* no ADP -- zero signal of any kind. Flagging
+    those with a hard ERROR (requiring a conscious `--force`) is
+    `check_coverage` doing exactly its documented job, not a defect; the real
+    regression this test guards against is anyone *else* unexpectedly losing
+    coverage. See `test_current_model_prices_every_player` for the guarantee
+    that actually matters for a real run: every player, these included, still
+    ends up priced once `model.compute` applies the ADP fallback.
+    """
     template = sources.load_template(cfg)
     frame = sources.from_csv(cfg)
     findings = validate.run_all(template, frame, cfg)
-    assert findings.ok, findings.report()
+
+    scoreable = frame[[f"{s.key}_FPts" for s in cfg.seasons]].notna().any(axis=1)
+    orphans = frame.loc[~scoreable]
+    assert orphans["ADP"].isna().all(), (
+        "an orphaned player has an ADP and should have been rescued by the "
+        "ADP fallback -- this is a real coverage regression, not the known "
+        "zero-signal-newcomer case"
+    )
+
+    remaining = [p for p in findings.problems if "no stats in any season" not in p]
+    assert not remaining, findings.report()
 
 
 def test_missing_season_is_a_hard_error(cfg, tmp_path):
@@ -279,9 +329,10 @@ def _rate_shrinkage_frame():
       13      MID_SAMPLE — 5 games, FP/G 5.0 (near the prior already; should
               barely move)
 
-    All at "2526" (a completed season) with matching, made-up numbers at
-    "2627" (the projection slot) that imply a tiny, meaningless games count —
-    this is what must NOT be shrunk, since it isn't a real observation.
+    The same figures are mirrored into "2627", the in-progress slot, so that
+    what happens to that column is decided purely by what the slot is declared
+    to hold: a projection must come back untouched, year-to-date actuals must
+    be shrunk exactly like any other real season.
     """
     regulars = [
         {"Name": f"Regular{i}", "Position": "D", "Old Salary": 5000,
@@ -300,10 +351,8 @@ def _rate_shrinkage_frame():
     ]
     frame = pd.DataFrame(regulars + specials)
     frame.insert(0, "ID", [f"*r{i}*" for i in range(len(frame))])
-    # 2627 (projection): a tiny made-up ratio, so its implied "games played"
-    # (2) would trigger heavy shrinkage if the season-0 exclusion is broken.
-    frame["2627_FPts"] = 6.0
-    frame["2627_FP/G"] = 3.0
+    frame["2627_FPts"] = frame["2526_FPts"]
+    frame["2627_FP/G"] = frame["2526_FP/G"]
     for key in ("2425", "2324"):
         frame[f"{key}_FPts"] = float("nan")
         frame[f"{key}_FP/G"] = float("nan")
@@ -339,13 +388,113 @@ def test_shrinkage_pulls_a_small_sample_cold_streak_up(current_cfg):
     assert shrunk.loc[COLD_STREAK, "2526_FP/G"] > -2.0
 
 
-def test_shrinkage_does_not_touch_the_projection_season(current_cfg):
-    """FPts/FP-G on the projection slot is not a real games-played count."""
+def test_shrinkage_does_not_touch_a_projection_slot():
+    """FPts/FP-G on a projection is not a real games-played count.
+
+    Pinned against the legacy seasons, which are the ones still declaring the
+    current slot as `PROJECTION_...`. Shrinking a forecast's implied sample
+    size is the mistake this exclusion exists to prevent.
+    """
+    projection_cfg = config_module.load(seasons=list(config_module.LEGACY_SEASONS))
+    assert projection_cfg.seasons[0].is_projection
     frame = _rate_shrinkage_frame()
-    shrunk = model.shrink_rates(frame, current_cfg)
+    shrunk = model.shrink_rates(frame, projection_cfg)
     pd.testing.assert_series_equal(
         shrunk["2627_FP/G"], frame["2627_FP/G"], check_names=False
     )
+
+
+def test_shrinkage_does_touch_the_current_season_once_it_is_actuals(current_cfg):
+    """The in-season slot is the smallest sample in the model, not an exception.
+
+    Once the current season carries year-to-date results, a two-game rate in it
+    is exactly the noise this function exists to damp. Excluding `seasons[0]`
+    by position instead of by content is what let a two-game newcomer out-score
+    Haaland at gameweek 3.
+    """
+    assert not current_cfg.seasons[0].is_projection
+    frame = _rate_shrinkage_frame()
+    shrunk = model.shrink_rates(frame, current_cfg)
+    # Same column, same numbers as 2526 — so it must get the same treatment.
+    assert shrunk.loc[HOT_STREAK, "2627_FP/G"] < 10.0
+    assert shrunk.loc[COLD_STREAK, "2627_FP/G"] > -2.0
+    assert shrunk.loc[REGULAR_ANCHOR, "2627_FP/G"] == pytest.approx(9.0)
+    pd.testing.assert_series_equal(
+        shrunk["2627_FP/G"], shrunk["2526_FP/G"], check_names=False
+    )
+
+
+def _roster_frame():
+    """A pool with a clear spread, half of it owned.
+
+    Deliberately built so the owned players are ones the model wants to move a
+    long way: freezing something that was not going to move proves nothing.
+    """
+    rows = []
+    for i in range(40):
+        rate = 8.0 - 6.0 * (i / 40)
+        rows.append(
+            {
+                "ID": f"*p{i}*", "Name": f"Player {i}", "Position": ["G", "D", "M", "F"][i % 4],
+                # Old salaries run opposite to form, so every player has a
+                # large gap between current price and earned price.
+                "Old Salary": 2500.0 + 300.0 * i,
+                "2627_FPts": rate * 20, "2627_FP/G": rate,
+                "2526_FPts": rate * 34, "2526_FP/G": rate,
+                "2425_FPts": rate * 32, "2425_FP/G": rate,
+                "2324_FPts": rate * 30, "2324_FP/G": rate,
+                "ADP": float("nan"),
+                "Rostered": i % 2 == 0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_rostered_players_keep_their_salary():
+    """An existing contract is a price already agreed, not a live valuation."""
+    frame = _roster_frame()
+    result = model.compute(frame, config_module.load(freeze_rostered=True))
+    owned = result.frame["Rostered"]
+    pd.testing.assert_series_equal(
+        result.frame.loc[owned, "Salary"],
+        result.frame.loc[owned, "Old Salary"],
+        check_names=False,
+    )
+
+
+def test_free_agents_are_still_repriced_around_them():
+    """Freezing contracts must not freeze the market."""
+    frame = _roster_frame()
+    result = model.compute(frame, config_module.load(freeze_rostered=True))
+    free = ~result.frame["Rostered"]
+    moved = result.frame.loc[free, "Salary"] != result.frame.loc[free, "Old Salary"]
+    assert moved.any(), "no free agent moved — the freeze is too broad"
+
+
+def test_freezing_does_not_change_anyone_elses_price():
+    """Owned players still anchor the scale; only their own salary is held.
+
+    If freezing removed them from the pool the whole league would reprice
+    against a smaller, unrepresentative sample, which is a much larger and far
+    less obvious change than the one being asked for.
+    """
+    frame = _roster_frame()
+    frozen = model.compute(frame, config_module.load(freeze_rostered=True))
+    live = model.compute(frame, config_module.load(freeze_rostered=False))
+    assert frozen.max_score == live.max_score
+    assert frozen.mean_score == live.mean_score
+    free = ~frame["Rostered"]
+    pd.testing.assert_series_equal(
+        frozen.frame.loc[free, "Salary"], live.frame.loc[free, "Salary"], check_names=False
+    )
+
+
+def test_freeze_can_be_switched_off():
+    frame = _roster_frame()
+    result = model.compute(frame, config_module.load(freeze_rostered=False))
+    owned = result.frame["Rostered"]
+    changed = result.frame.loc[owned, "Salary"] != result.frame.loc[owned, "Old Salary"]
+    assert changed.any(), "fixture should have owned players the model wants to move"
 
 
 def test_shrinkage_can_be_switched_off(cfg):
@@ -360,7 +509,15 @@ def test_current_model_prices_every_player(current_cfg):
     """The live configuration must still produce a complete upload."""
     result = model.compute(sources.from_csv(current_cfg), current_cfg)
     assert result.frame["Salary"].notna().all()
-    assert (result.frame["Salary"] >= current_cfg.salary_floor).all()
+    # The floor binds on everyone the model actually prices. It does not bind
+    # on a frozen contract: a player already rostered below the floor (an old
+    # league setting left some at 2,000) keeps what they are on, because
+    # `freeze_rostered` means their salary is not ours to move -- in either
+    # direction. Raising them would quietly cost their manager cap space.
+    priced = ~result.frame["Rostered"].fillna(False).astype(bool)
+    assert (result.frame.loc[priced, "Salary"] >= current_cfg.salary_floor).all()
+    frozen = result.frame.loc[~priced]
+    assert (frozen["Salary"] == frozen["Old Salary"]).all()
 
 
 def test_current_model_lifts_newcomers_off_the_floor(cfg, current_cfg):
