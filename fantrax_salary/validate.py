@@ -83,13 +83,77 @@ def check_coverage(frame: pd.DataFrame, config: Config) -> Findings:
                     f"{season.label}: {missing} of {len(frame)} players have no data ({share:.0%})"
                 )
 
+    # Players with nothing anywhere. This is two completely different
+    # situations wearing the same shape, and the share tells them apart:
+    #
+    #   a broken join -- wrong template, wrong league, ids that do not line up
+    #   -- leaves everyone or nearly everyone unscoreable, and must be fatal,
+    #   because every salary that follows would be invented.
+    #
+    #   a genuine newcomer -- signed from abroad, promoted, or simply never
+    #   having played a Premier League minute -- is unscoreable for a real
+    #   reason that no amount of re-exporting will fix, and there were 63 of
+    #   them at gameweek 3 of 2026-27. The model already handles them: a NaN
+    #   score takes the floor as its target and eases toward it. Refusing the
+    #   run for that taught the operator to reach for `--force`, which is worse
+    #   than the thing the check was guarding against, since `--force` also
+    #   silences every other problem in this file.
     scoreable = frame[[f"{s.key}_FPts" for s in config.seasons]].notna().any(axis=1)
-    if not scoreable.all():
+    unscoreable = int((~scoreable).sum())
+    if unscoreable:
         orphans = frame.loc[~scoreable, "Name"].head(5).tolist()
-        findings.problems.append(
-            f"{int((~scoreable).sum())} players have no stats in any season, e.g. {orphans}"
-        )
+        share = unscoreable / len(frame)
+        if share > 0.5:
+            findings.problems.append(
+                f"{unscoreable} of {len(frame)} players ({share:.0%}) have no stats in any "
+                f"season, e.g. {orphans}. That is too many to be genuine newcomers — "
+                "check the template is this season's and the league id is right."
+            )
+        else:
+            findings.warnings.append(
+                f"{unscoreable} players have no stats in any season, e.g. {orphans}. "
+                f"They will be priced toward the {config.salary_floor:,} floor, which is "
+                "the intended handling for a player with no record."
+            )
 
+    return findings
+
+
+def check_rosters(frame: pd.DataFrame, config: Config) -> Findings:
+    """Existing contracts must actually be identified before they can be kept.
+
+    `freeze_rostered` is the difference between repricing the market and
+    repricing squads that have already been paid for, and it depends on a live
+    lookup. A lookup that quietly returned nothing would reprice all ten teams
+    without anything in the output looking wrong, so silence is not an option
+    here — but neither is refusing the run, since the operator may legitimately
+    want a preview. It warns, loudly and specifically.
+    """
+    findings = Findings()
+    if not config.freeze_rostered:
+        return findings
+
+    error = frame.attrs.get("roster_error")
+    if error:
+        findings.problems.append(
+            f"could not read team rosters ({error}). Every rostered player would be "
+            "repriced. Re-run when it is reachable, or pass freeze_rostered=false in a "
+            "config file to accept that deliberately."
+        )
+        return findings
+
+    owned = int(frame.get("Rostered", pd.Series(dtype=bool)).sum())
+    if owned == 0:
+        findings.warnings.append(
+            "team rosters came back empty — no player is being treated as owned"
+        )
+    unmatched = int(frame.attrs.get("roster_unmatched") or 0)
+    if unmatched:
+        findings.warnings.append(
+            f"{unmatched} rostered player(s) are not in the template, so they cannot be "
+            "frozen. The template is probably older than the last transaction — "
+            "re-export it if a manager's squad has changed."
+        )
     return findings
 
 
@@ -184,6 +248,7 @@ def run_all(template: pd.DataFrame, frame: pd.DataFrame, config: Config) -> Find
         check_template(template),
         check_coverage(frame, config),
         check_current_season_is_results(frame, config),
+        check_rosters(frame, config),
         check_freshness(config),
     ):
         combined.problems.extend(findings.problems)

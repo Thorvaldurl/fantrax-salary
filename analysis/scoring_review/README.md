@@ -5,7 +5,7 @@ salary pipeline — `fantrax_salary` never imports anything here.
 
 ```
 scoring.py    a standalone re-implementation of the league's scoring rules,
-              parsed straight from data/leagueinfo.json's scoringSystem
+              parsed straight from a leagueinfo file's scoringSystem
 simulate.py   positional balance under current scoring, and the effect of
               candidate tweaks, run against data/season_2526_categories.json
 data/         cached inputs -- see below
@@ -16,6 +16,32 @@ Run it from the repo root:
 ```bash
 python analysis/scoring_review/simulate.py
 ```
+
+## The two leagueinfo files, and why the baseline must not be replaced
+
+There are two scoring configs in `data/`, and mixing them up silently
+invalidates every number this analysis produces.
+
+| file | what it is |
+| --- | --- |
+| `leagueinfo.json` | the **baseline** — the scoring in force when Fantrax computed the `FPts` in `season_2526_categories.json` |
+| `leagueinfo_live.json` | the **current** live scoring, after eight volume categories were trimmed |
+
+The baseline is not "the old file, kept for history". It is load-bearing.
+Everything here is computed as a *delta* applied to Fantrax's own reported
+`FPts`, and those reported points were generated under the baseline rules. So
+the subtraction only cancels correctly — and only makes the banded categories
+drop out — if the "before" side of it is the config that produced them.
+
+Refreshing `leagueinfo.json` to match live would therefore **not** update the
+analysis; it would break it, by differencing the live config against itself
+while still adding the result to points scored under the old one. When the
+scoring changes again, add another file; do not overwrite this one.
+
+`simulate.py` has not yet been rewired to the two-file comparison, so it still
+reports the pre-change baseline as "current". The figures in
+[`docs/scoring-review.md`](../../docs/scoring-review.md) are against the live
+config and were produced by differencing the two files directly.
 
 ## Why the data is cached rather than fetched live
 

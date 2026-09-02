@@ -68,6 +68,17 @@ def build(result: ModelResult, config: Config) -> str:
                     f"ADP {row.get('ADP', float('nan')):>6,.1f}   {row['Salary']:>7,.0f}"
                 )
 
+    if config.freeze_rostered and "Rostered" in frame.columns:
+        owned = frame["Rostered"].fillna(False).astype(bool)
+        # What matters is not how many are owned but how many the model *wanted*
+        # to move and was stopped from moving -- that number is the whole effect
+        # of the setting, and it is invisible everywhere else in this report.
+        held = owned & (frame["TargetSalary"].round(config.rounding) != frame["Old Salary"])
+        lines.append(_rule("Rostered players (not repriced)"))
+        lines.append(f"  on a roster              {int(owned.sum()):>4}")
+        lines.append(f"  held at current salary   {int(held.sum()):>4}")
+        lines.append(f"  free agents repriced     {int((~owned).sum()):>4}")
+
     floored = int((frame["Salary"] <= config.salary_floor).sum())
     capped = int((frame["Salary"] >= config.salary_target_max).sum())
     lines.append(_rule("Distribution"))

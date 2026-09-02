@@ -153,6 +153,14 @@ class FantraxClient:
             "maxResultsPerPage": page_size,
             "pageNumber": str(page),
             "miscDisplayType": "1",
+            # Without this, the server defaults a *historical* season to its
+            # weekly-projection view: FPts comes back 0 for everyone and the
+            # FP/G column is dropped from the header entirely (10 columns
+            # become 9), which is what used to surface downstream as
+            # "'fptsPerGame' is not in list". Harmless to send even when
+            # `season_code` is a projection or omitted entirely — confirmed
+            # against the live API, still 10 columns, same content either way.
+            "timeframeTypeCode": "YEAR_TO_DATE",
         }
         if season_code:
             data["seasonOrProjection"] = season_code
@@ -210,6 +218,39 @@ class FantraxClient:
         if not rows:
             raise FantraxError(f"no rows returned for season {season_code!r}")
         return pd.DataFrame(rows)
+
+
+    def rostered_ids(self) -> set:
+        """Player ids currently on a manager's roster, as template-style ids.
+
+        This is the one thing the *documented* API is good for here: no auth,
+        no client version to go stale, and it cannot be broken by a Fantrax
+        deploy the way `/fxpa/req` can. Worth preferring wherever it suffices.
+
+        `getTeamRosters` returns bare ids (`078wl`); the commissioner template
+        writes them starred (`*078wl*`), and the join is on the starred form,
+        so they are converted here rather than at each call site.
+        """
+        response = self.session.get(
+            f"{ORIGIN}/fxea/general/getTeamRosters",
+            params={"leagueId": self.league_id},
+            timeout=TIMEOUT,
+        )
+        if response.status_code != 200:
+            raise FantraxError(
+                f"getTeamRosters returned HTTP {response.status_code} for league "
+                f"{self.league_id}"
+            )
+        payload = response.json()
+        rosters = payload.get("rosters")
+        if not isinstance(rosters, dict) or not rosters:
+            raise FantraxError("getTeamRosters returned no rosters")
+        return {
+            f"*{item['id']}*"
+            for team in rosters.values()
+            for item in team.get("rosterItems", [])
+            if item.get("id")
+        }
 
 
 def discover_api_version(session: Optional[requests.Session] = None) -> str:

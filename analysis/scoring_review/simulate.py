@@ -40,10 +40,28 @@ SEASON_FILE = HERE / 'data' / 'season_2526_categories.json'
 LEAGUE_INFO = HERE / 'data' / 'leagueinfo.json'
 TEMPLATE = REPO_ROOT / 'data' / 'template' / 'blank_2026-27.csv'
 
+# Roster rules, confirmed with the commissioner in the Fantrax UI.
+#
+# These do NOT match `getLeagueInfo.rosterInfo`, which reports a 25-man roster
+# and exposes position MAXIMUMS only. An earlier version of this analysis read
+# that silence as "no minimums exist", concluded 1 G + 5 D + 5 M = 11 was a
+# legal forward-free XI, and built its headline finding on it. Every position
+# has a minimum of one, so that lineup is not legal -- and is not even eleven
+# players once the mandatory goalkeeper is counted. An API that returns one
+# half of a constraint pair reads as an absent constraint; it is not.
 MAX_ACTIVE = {'G': 1, 'D': 5, 'M': 5, 'F': 3}
+MIN_ACTIVE = {'G': 1, 'D': 1, 'M': 1, 'F': 1}
 TYPICAL = {'G': 1, 'D': 4, 'M': 4, 'F': 2}
 TEAMS = 10
 ACTIVE = 11
+ROSTER = 15          # per team, of which GOALIES_PER_ROSTER are goalkeepers
+GOALIES_PER_ROSTER = 2
+SALARY_CAP = 100_000  # per team
+
+# 10 x 15 = 150 players are rostered league-wide, so the 150th-best player is
+# the last one who costs anything -- #151 is free on waivers. That makes him
+# the only meaningful replacement level for "how much is a player worth".
+ROSTERED = TEAMS * ROSTER
 MIN_GAMES = 10
 
 NON_STAT = {'Rk', 'Sta', 'Opp', 'Sal', 'FPts', 'FP/G', '%D', 'ADP', 'Ros', '+/-'}
@@ -149,16 +167,36 @@ def tweaked_frame(players, base_system, tweaked_system, banned):
 
 
 def best_eleven(frame):
+    """Highest-scoring LEGAL starting XI, respecting minimums and maximums.
+
+    Filling each position's minimum first and then taking the best of what is
+    left is optimal here, not just a heuristic: the constraint is a partition
+    matroid (independent per-position caps over disjoint groups), and greedy is
+    exact on a matroid. Ignoring the minimums -- as this function used to --
+    produces lineups that are simply illegal, and in the forward-light
+    direction specifically, which is the exact question being measured.
+    """
     pool = frame.sort_values('FPG', ascending=False)
-    picked, counts = [], defaultdict(int)
+    picked, counts, used = [], defaultdict(int), set()
+
+    for position, needed in MIN_ACTIVE.items():
+        for _, row in pool[pool.Pos == position].head(needed).iterrows():
+            picked.append(row)
+            counts[position] += 1
+            used.add(row.ID)
+
     for _, row in pool.iterrows():
+        if len(picked) >= ACTIVE:
+            break
         position = row.Pos
-        if position not in MAX_ACTIVE or counts[position] >= MAX_ACTIVE[position]:
+        if row.ID in used or position not in MAX_ACTIVE:
+            continue
+        if counts[position] >= MAX_ACTIVE[position]:
             continue
         picked.append(row)
         counts[position] += 1
-        if len(picked) == ACTIVE:
-            break
+        used.add(row.ID)
+
     return pd.DataFrame(picked), dict(counts)
 
 
