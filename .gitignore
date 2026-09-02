@@ -3,7 +3,10 @@
 # default source became the API: it serves the current season only, so a past
 # run cannot be regenerated once the standings move. The committed CSV is now
 # the sole record of what was actually uploaded to Fantrax and when.
-# Zipped bundles are not -- they duplicate files already tracked here.
+# The workbook is not: it is the CSV's own intermediate columns rebuilt for
+# eyeballing, so it adds ~100 KB per gameweek to say what the tracked CSV and
+# report already say. Zipped bundles are out for the same reason.
+output/*.xlsx
 output/*.zip
 
 # Python

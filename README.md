@@ -324,7 +324,13 @@ The original drift risk is real and has not gone away. What contains it is that
 each run also writes `SalGWN.report.txt` next to the CSV, recording the scale,
 the pool totals and the movers that produced those numbers — so a committed
 output carries the evidence for itself rather than being a bare file of numbers
-whose provenance has to be guessed at later. Zipped bundles stay ignored.
+whose provenance has to be guessed at later.
+
+Only the CSV and the report are tracked. `SalGWN.xlsx` is still written on every
+run, but it is the same numbers with the intermediate columns exposed for
+eyeballing, and at roughly 100 KB a gameweek it would come to dominate the repo
+to restate what the other two files already record. It stays local, along with
+any zipped bundles.
 
 ---
 
