@@ -1,0 +1,64 @@
+
+Scale
+-----
+  highest weighted score   1.8539
+  mean (non-zero) score    0.7436
+  salary multiplier        7,367
+
+Salary pool
+-----------
+  current total               2,874,200
+  after this run              2,850,600  (-0.8%)
+  at full convergence         2,823,153  (-1.8%)
+
+By position
+-----------
+  M,F      36 players   mean    5,325   max   11,400
+  D,M      11 players   mean    4,664   max    9,000
+  D       211 players   mean    4,461   max   10,900
+  M       198 players   mean    4,299   max   15,000
+  G        80 players   mean    3,998   max    8,800
+  F       129 players   mean    3,821   max   12,200
+  D,F       1 players   mean    2,500   max    2,500
+
+Priced from draft ADP
+---------------------
+  players with no record     23 (ADP inside the first 250 picks)
+    Johan Manzambi           M    ADP   80.3     4,800
+    Bobby Thomas             D    ADP  199.7     4,800
+    Hayden Hackney           M    ADP  165.6     4,600
+    Tarik Muharemovic        D    ADP  183.4     4,600
+    Jack Rudoni              M    ADP  223.1     4,600
+    Ronald Araujo            D    ADP  107.0     4,400
+    Mohamed Belloumi         M,F  ADP  201.1     4,300
+    Daizen Maeda             F    ADP  124.6     4,300
+
+Distribution
+------------
+  at the 2,500 floor         183 (27%)
+  at the 15,000 ceiling         1
+
+Biggest moves
+-------------
+  up:
+    Carl Rushworth           G      2,500 ->   7,900  (+5,400)
+    Lukas Hornicek           G      2,500 ->   6,700  (+4,200)
+    Matt Grimes              M      2,500 ->   6,400  (+3,900)
+    Liam Kitching            D      2,500 ->   6,400  (+3,900)
+    Milan van Ewijk          D      2,500 ->   6,200  (+3,700)
+    Jack Butland             G      2,500 ->   6,100  (+3,600)
+    Konstantinos Tzolakis    G      2,500 ->   6,000  (+3,500)
+    Tatsuhiro Sakamoto       M      2,500 ->   5,900  (+3,400)
+    Liam Millar              M,F    2,500 ->   5,800  (+3,300)
+    Oliver McBurnie          F      2,500 ->   5,700  (+3,200)
+  down:
+    Valentino Livramento     D     10,900 ->   8,400  (-2,500)
+    Walter Benitez           G      7,400 ->   5,000  (-2,400)
+    Jarrad Branthwaite       D      8,000 ->   6,300  (-1,700)
+    Wesley Fofana            D      7,200 ->   5,500  (-1,700)
+    Alejandro Garnacho       M,F    6,800 ->   5,200  (-1,600)
+    Dominic Solanke          F      7,500 ->   5,900  (-1,600)
+    Dan Burn                 D      8,000 ->   6,500  (-1,500)
+    Jorgen Strand Larsen     F      6,200 ->   4,700  (-1,500)
+    Florentino               M      5,200 ->   3,800  (-1,400)
+    Malo Gusto               D      6,900 ->   5,500  (-1,400)

@@ -309,9 +309,22 @@ analysis/
 output/        generated; git-ignored
 ```
 
-`output/` is deliberately **not** committed. Results are reproducible from their
-inputs, and committing them is exactly how the repo previously ended up with a
-`SalGW1.csv` that no longer matched the data that produced it.
+`output/` **is** committed, which reverses an earlier decision worth explaining.
+It was ignored because results are reproducible from their inputs, and
+committing them is how the repo once ended up with a `SalGW1.csv` that no
+longer matched the data that produced it.
+
+That reasoning assumed `--source csv`. It stopped holding when the API became
+the default: `getPlayerStats` serves the standings *as they are now*, so a run
+from gameweek 3 cannot be reproduced in gameweek 12 — the inputs no longer
+exist anywhere. The uploaded CSV is therefore the only record of what the
+league was actually charged, and losing it loses the history outright.
+
+The original drift risk is real and has not gone away. What contains it is that
+each run also writes `SalGWN.report.txt` next to the CSV, recording the scale,
+the pool totals and the movers that produced those numbers — so a committed
+output carries the evidence for itself rather than being a bare file of numbers
+whose provenance has to be guessed at later. Zipped bundles stay ignored.
 
 ---
 
