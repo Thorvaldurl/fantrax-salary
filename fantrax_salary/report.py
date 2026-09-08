@@ -68,6 +68,22 @@ def build(result: ModelResult, config: Config) -> str:
                     f"ADP {row.get('ADP', float('nan')):>6,.1f}   {row['Salary']:>7,.0f}"
                 )
 
+    proj_column = f"{config.projection_key}_FPts"
+    if config.projection_fallback and proj_column in frame.columns:
+        priced_on_forecast = frame[proj_column].notna()
+        lines.append(_rule("Priced from the preseason forecast"))
+        lines.append(
+            f"  players with no record   {int(priced_on_forecast.sum()):>4} "
+            "(nothing in any season; forecast is all there is)"
+        )
+        if priced_on_forecast.any():
+            shown = frame.loc[priced_on_forecast].nlargest(8, "Salary")
+            for _, row in shown.iterrows():
+                lines.append(
+                    f"    {str(row['Name'])[:24]:<24} {str(row['Position']):<4} "
+                    f"{row['Old Salary']:>7,.0f} -> {row['Salary']:>7,.0f}"
+                )
+
     if config.freeze_rostered and "Rostered" in frame.columns:
         owned = frame["Rostered"].fillna(False).astype(bool)
         # What matters is not how many are owned but how many the model *wanted*

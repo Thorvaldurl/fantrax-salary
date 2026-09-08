@@ -115,6 +115,24 @@ def from_api(config: Config) -> pd.DataFrame:
     client = FantraxClient(config.league_id, config.api_version)
     stats = {season.key: client.player_stats(season.api_code) for season in config.seasons}
     frame = _merge(base_frame(template), stats, config)
+
+    # The preseason forecast, carried alongside the real seasons rather than as
+    # one of them: `model.projection_season` hands it only to players who have
+    # no record anywhere, so it never touches a salary that real football can
+    # explain. Fetched here because it is an extra round trip that CSV mode has
+    # no offline equivalent for.
+    if config.projection_fallback and config.projection_api_code:
+        forecast = client.player_stats(config.projection_api_code)
+        frame = frame.merge(
+            forecast[["ID", "FPts", "FP/G"]].rename(
+                columns={"FPts": "ProjFPts", "FP/G": "ProjFP/G"}
+            ),
+            on="ID",
+            how="left",
+        )
+        for column in ("ProjFPts", "ProjFP/G"):
+            frame[column] = _numeric(frame[column])
+
     return _attach_rosters(frame, config)
 
 

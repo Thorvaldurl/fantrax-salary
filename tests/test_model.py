@@ -31,6 +31,7 @@ def cfg():
         seasons=list(config_module.LEGACY_SEASONS),
         blank_zero_seasons=False,
         adp_fallback=False,
+        projection_fallback=False,
         rate_shrinkage=False,
         # The original script repriced every player, owned or not. Freezing
         # existing contracts is a later, deliberate divergence like the three
@@ -422,6 +423,92 @@ def test_shrinkage_does_touch_the_current_season_once_it_is_actuals(current_cfg)
     pd.testing.assert_series_equal(
         shrunk["2627_FP/G"], shrunk["2526_FP/G"], check_names=False
     )
+
+
+def _forecast_frame():
+    """Veterans with real records and a forecast, plus players with neither.
+
+    The no-record players are given forecasts spanning the range, so a test can
+    tell "the forecast was used" from "everyone got the same number".
+    """
+    rows = []
+    for i in range(40):
+        rate = 8.0 - 6.0 * (i / 40)
+        rows.append(
+            {
+                "ID": f"*v{i}*", "Name": f"Veteran {i}", "Position": ["G", "D", "M", "F"][i % 4],
+                "Old Salary": 4000.0,
+                "2627_FPts": rate * 2, "2627_FP/G": rate,
+                "2526_FPts": rate * 34, "2526_FP/G": rate,
+                "2425_FPts": rate * 32, "2425_FP/G": rate,
+                "2324_FPts": rate * 30, "2324_FP/G": rate,
+                "ADP": float("nan"), "ProjFPts": rate * 30, "ProjFP/G": rate,
+                "Rostered": False,
+            }
+        )
+    for index, (name, forecast) in enumerate(
+        [("Highly rated", 230.0), ("Middling", 120.0), ("Poorly rated", 20.0), ("Unknown", float("nan"))]
+    ):
+        rows.append(
+            {
+                "ID": f"*n{index}*", "Name": name, "Position": "F", "Old Salary": 2000.0,
+                "2627_FPts": float("nan"), "2627_FP/G": float("nan"),
+                "2526_FPts": float("nan"), "2526_FP/G": float("nan"),
+                "2425_FPts": float("nan"), "2425_FP/G": float("nan"),
+                "2324_FPts": float("nan"), "2324_FP/G": float("nan"),
+                "ADP": float("nan"), "ProjFPts": forecast, "ProjFP/G": float("nan"),
+                "Rostered": False,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+HIGH, MID, LOW, UNKNOWN = 40, 41, 42, 43
+
+
+def test_forecast_only_fills_players_with_no_record(current_cfg):
+    """A record beats a forecast — anyone with real football never sees it."""
+    filled = model.projection_season(_forecast_frame(), current_cfg)
+    key = current_cfg.projection_key
+    assert filled[f"{key}_FPts"].iloc[:40].isna().all(), "veterans must not be touched"
+    assert filled[f"{key}_FPts"].iloc[HIGH] > 0
+
+
+def test_forecast_ranks_a_better_rated_player_higher(current_cfg):
+    filled = model.projection_season(_forecast_frame(), current_cfg)
+    key = current_cfg.projection_key
+    assert filled[f"{key}_FPts"].iloc[HIGH] > filled[f"{key}_FPts"].iloc[MID]
+    assert filled[f"{key}_FPts"].iloc[MID] >= filled[f"{key}_FPts"].iloc[LOW]
+
+
+def test_forecast_leaves_a_player_it_has_no_opinion_on_alone(current_cfg):
+    """No forecast either — nothing can price them, and the floor is honest."""
+    filled = model.projection_season(_forecast_frame(), current_cfg)
+    assert pd.isna(filled[f"{current_cfg.projection_key}_FPts"].iloc[UNKNOWN])
+
+
+def test_forecast_gives_a_good_newcomer_a_score_at_all(current_cfg):
+    """The whole point: Barcola should be priced on something, not on nothing.
+
+    Asserted on the score rather than the salary. Whether a score clears the
+    floor depends on where it sits against the pool mean, which is a property
+    of the pool -- in a fixture of forty near-identical veterans it does not,
+    and in the real pool it does. What this function is responsible for is that
+    a rated newcomer has a score and an unrated one does not.
+    """
+    result = model.compute(_forecast_frame(), current_cfg)
+    score = result.frame["WeightedScore"]
+    assert not pd.isna(score.iloc[HIGH])
+    assert score.iloc[HIGH] > score.iloc[LOW]
+    assert pd.isna(score.iloc[UNKNOWN]), "no forecast means nothing to price on"
+
+
+def test_forecast_fallback_can_be_switched_off():
+    cfg = config_module.load(projection_fallback=False)
+    result = model.compute(_forecast_frame(), cfg)
+    score = result.frame["WeightedScore"]
+    assert pd.isna(score.iloc[HIGH]) and pd.isna(score.iloc[UNKNOWN])
+    assert result.frame["Salary"].iloc[HIGH] == result.frame["Salary"].iloc[UNKNOWN]
 
 
 def _roster_frame():

@@ -292,6 +292,83 @@ def adp_season(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
     return out
 
 
+def projection_season(frame: pd.DataFrame, config: Config) -> pd.DataFrame:
+    """Add a forecast-derived pseudo-season for players with no record at all.
+
+    The counterpart to `adp_season`, for the same players and the same reason.
+    ADP answers "what did the league think of this player" and stops being
+    available the moment the draft ends; the forecast answers "what does
+    Fantrax think of this player" and is served all season, so it is what is
+    left once ADP goes.
+
+    Filled only for players with nothing in *any* configured season, current
+    one included. A player with two games has a thin record, but it is a real
+    one, and `shrink_rates` already handles thin. This column exists for the
+    case where there is nothing at all to be thin about -- a good player newly
+    arrived from abroad, whose alternative is the floor.
+
+    The forecast is a full-season total and the reference season is however
+    much football has been played, so the two are not in the same units and
+    cannot be compared directly. Rather than assume a conversion, the
+    forecast-to-reference relationship is fitted from the players who have
+    both, exactly as `adp_season` fits its own -- which re-calibrates every
+    week as the reference season fills out, and needs no constant anywhere.
+    The fit is linear, since points forecast and points scored are already in
+    the same kind of units (ADP needs a log because draft value decays
+    hyperbolically; this does not).
+
+    `projection_shrinkage` then pulls the result back. The fit is built on
+    established players, and a newcomer the forecast likes tends to fall short
+    of what an established player with the same forecast actually returns.
+    """
+    out = frame.copy()
+    fpts_column, fpg_column = f"{config.projection_key}_FPts", f"{config.projection_key}_FP/G"
+    out[fpts_column] = float("nan")
+    out[fpg_column] = float("nan")
+
+    if "ProjFPts" not in out.columns:
+        return out
+
+    forecast = pd.to_numeric(out["ProjFPts"], errors="coerce")
+    reference = config.seasons[0].key
+
+    # Nothing anywhere, current season included -- see the docstring.
+    has_record = pd.concat(
+        [out[f"{s.key}_FPts"].notna() for s in config.seasons], axis=1
+    ).any(axis=1)
+
+    # Fit on players who have both a forecast and a real reference-season
+    # record. The players about to be priced are excluded by construction, so
+    # nothing is fitted to itself.
+    fit_rows = forecast.notna() & (forecast > 0) & out[f"{reference}_FPts"].notna()
+    if fit_rows.sum() < 30:
+        return out
+
+    x = forecast[fit_rows]
+    coefficients = {
+        column: np.polyfit(x, out.loc[fit_rows, column], 1)
+        for column in (f"{reference}_FPts", f"{reference}_FP/G")
+    }
+
+    target = ~has_record & forecast.notna() & (forecast > 0)
+    if not target.any():
+        return out
+
+    predictor = forecast[target]
+    for source_column, destination in (
+        (f"{reference}_FPts", fpts_column),
+        (f"{reference}_FP/G", fpg_column),
+    ):
+        predicted = np.polyval(coefficients[source_column], predictor) * config.projection_shrinkage
+        # A forecast can fit below the pool's own worst real return; that is
+        # not information, so it is clipped rather than allowed to set a new
+        # bottom for `normalise` to scale everything else against.
+        floor_value = out.loc[fit_rows, source_column].min()
+        out.loc[target, destination] = np.maximum(predicted, floor_value)
+
+    return out
+
+
 def weighted_score(frame: pd.DataFrame, config: Config) -> pd.Series:
     """Blend the seasons into one score per player.
 
@@ -310,6 +387,11 @@ def weighted_score(frame: pd.DataFrame, config: Config) -> pd.Series:
     if config.adp_fallback:
         inputs.append(
             (f"{config.adp_key}_FPts", f"{config.adp_key}_FP/G", config.adp_weight)
+        )
+    if config.projection_fallback:
+        inputs.append(
+            (f"{config.projection_key}_FPts", f"{config.projection_key}_FP/G",
+             config.projection_weight)
         )
 
     for fpts_column, fpg_column, weight in inputs:
@@ -336,21 +418,28 @@ def compute(frame: pd.DataFrame, config: Config) -> ModelResult:
         prepared = shrink_rates(prepared, config)
     if config.adp_fallback:
         prepared = adp_season(prepared, config)
+    if config.projection_fallback:
+        prepared = projection_season(prepared, config)
 
     # Normalising after the two steps above matters: a column full of
     # newcomers' zeros would otherwise set the bottom of the [0, 1] scale.
     data = normalise(prepared, config.stat_columns)
+    # Both fallback columns hold predictions *of* the reference season, so they
+    # have to be put on the reference season's scale. Normalising them over
+    # their own range instead would silently promote the best-drafted or
+    # best-forecast newcomer to the top of the league.
+    fallback_keys = []
     if config.adp_fallback:
-        # The ADP columns are predictions *of* the reference season, so they
-        # have to be put on the reference season's scale. Normalising them over
-        # their own range instead would silently promote the best-drafted
-        # newcomer to the top of the league.
-        reference = config.seasons[0].key
+        fallback_keys.append(config.adp_key)
+    if config.projection_fallback:
+        fallback_keys.append(config.projection_key)
+    reference = config.seasons[0].key
+    for key in fallback_keys:
         for suffix in ("FPts", "FP/G"):
             source = prepared[f"{reference}_{suffix}"]
             low, high = source.min(), source.max()
             span = high - low
-            column = f"{config.adp_key}_{suffix}"
+            column = f"{key}_{suffix}"
             data[column] = (prepared[column] - low) / span if span else prepared[column] * 0.0
 
     data["WeightedScore"] = weighted_score(data, config)

@@ -167,6 +167,31 @@ class Config:
     # 0.01 RMSE of each other); re-check it if the league size changes.
     adp_shrinkage: float = 0.7
 
+    # --- players with no record at all ---------------------------------------
+    # Fantrax's own preseason forecast, used the way `adp_fallback` is: as a
+    # last resort for players the model can otherwise say nothing about.
+    #
+    # This slot used to be the current season itself, at 0.20 for everyone.
+    # Moving that slot onto year-to-date results was right for anyone with a
+    # record and removed the only signal that existed for anyone without one --
+    # a good player newly arrived from abroad scored NaN and took the floor.
+    # 138 players were in that position at gameweek 3, and the projection knows
+    # 65 of them.
+    #
+    # It is a fallback and nothing more. The projection carries a positional
+    # bias of its own (it rates Barcola above Haaland), which is why it was cut
+    # from 0.70 to 0.20 and then off the general blend entirely; letting it
+    # back in for players who have real data would re-import exactly that.
+    projection_fallback: bool = True
+    projection_weight: float = 0.25  # matches `adp_weight`: same job, same trust
+    projection_key: str = "proj"
+    projection_api_code: str = "PROJECTION_0_926_SEASON"
+
+    # The fitted curve is built on players who have a record, and those players
+    # are established; a newcomer the forecast likes still tends to fall short
+    # of one. Same pull-back, and same reasoning, as `adp_shrinkage`.
+    projection_shrinkage: float = 0.7
+
     # --- small samples -------------------------------------------------------
     # A rate (FP/G) measured over a handful of games is mostly noise. Without
     # this, a good player who was rotated or injured scores identically to a

@@ -1,0 +1,74 @@
+
+Scale
+-----
+  highest weighted score   1.9507
+  mean (non-zero) score    0.6540
+  salary multiplier        5,548
+
+Salary pool
+-----------
+  current total               2,762,000
+  after this run              2,762,100  (+0.0%)
+  at full convergence         2,724,488  (-1.4%)
+
+By position
+-----------
+  M,F      38 players   mean    5,166   max   11,400
+  D,F       1 players   mean    5,100   max    5,100
+  D,M      10 players   mean    4,890   max    9,000
+  D       205 players   mean    4,491   max   10,900
+  M       189 players   mean    4,296   max   15,000
+  G        84 players   mean    3,855   max    9,700
+  F       120 players   mean    3,794   max   12,200
+
+Priced from draft ADP
+---------------------
+  players with no record      0 (ADP inside the first 250 picks)
+
+Priced from the preseason forecast
+----------------------------------
+  players with no record     62 (nothing in any season; forecast is all there is)
+    Jack Butland             G      6,100 ->   4,900
+    Johan Manzambi           M      4,800 ->   4,800
+    Liam Kitching            D      6,400 ->   4,400
+    Juanlu Sanchez           M      5,500 ->   4,000
+    Charlie Hughes           D      5,200 ->   3,800
+    Marco Palestra           D      3,700 ->   3,700
+    Benjamin Lecomte         G      4,300 ->   3,400
+    Haji Wright              F      4,100 ->   3,300
+
+Rostered players (not repriced)
+-------------------------------
+  on a roster               144
+  held at current salary    138
+  free agents repriced      503
+
+Distribution
+------------
+  at the 2,500 floor         151 (23%)
+  at the 15,000 ceiling         1
+
+Biggest moves
+-------------
+  up:
+    Semi Ajayi               D      2,600 ->   6,900  (+4,300)
+    Konstantinos Tzolakis    G      6,000 ->   9,700  (+3,700)
+    Bobby Thomas             D      4,800 ->   8,100  (+3,300)
+    Amar Dedic               D      2,700 ->   5,900  (+3,200)
+    Nobel Mendy              D      4,400 ->   7,100  (+2,700)
+    Anan Khalaili            D,F    2,500 ->   5,100  (+2,600)
+    Nico Elvedi              D      2,000 ->   4,400  (+2,400)
+    Abdul Fatawu             F      2,000 ->   4,300  (+2,300)
+    John Egan                D      4,300 ->   6,600  (+2,300)
+    Mohamed Belloumi         M,F    4,300 ->   6,500  (+2,200)
+  down:
+    Liam Kitching            D      6,400 ->   4,400  (-2,000)
+    Valentino Livramento     D      8,400 ->   6,700  (-1,700)
+    Juanlu Sanchez           M      5,500 ->   4,000  (-1,500)
+    Omar Alderete            D      8,400 ->   7,000  (-1,400)
+    Charlie Hughes           D      5,200 ->   3,800  (-1,400)
+    Joao Gomes               M      7,400 ->   6,000  (-1,400)
+    Jack Butland             G      6,100 ->   4,900  (-1,200)
+    Dominic Solanke          F      5,900 ->   4,700  (-1,200)
+    Walter Benitez           G      5,000 ->   3,900  (-1,100)
+    Carl Rushworth           G      7,900 ->   6,800  (-1,100)
